@@ -11,7 +11,7 @@ y = windowHeight / 2
 image = Image.new("RGBA", (windowWidth, windowHeight), (255, 255, 255, 0))
 draw = ImageDraw.Draw(image)
 
-fontPath = "./font/EightBitDragon-anqx.ttf"		#Path of the .ttf file
+fontPath = "./font/CaviarDreams_Bold.ttf"		#Path of the .ttf file
 
 EightBitDragonDate = ImageFont.truetype(fontPath, 70)
 EightBitDragonTime = ImageFont.truetype(fontPath, 270)
