@@ -2,64 +2,60 @@ import tkinter as tk
 import time
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
-windowWidth = 1024		#window size of the smart display
-windowHeight = 600			
+class ClockScreen(tk.Frame):
+    def __init__(self, parent, controller=None):
+        super().__init__(parent)
+        self.controller = controller
 
-x = windowWidth / 2 	#the middle point of the window
-y = windowHeight / 2
+        self.windowWidth = 1024
+        self.windowHeight = 600
+        self.x = self.windowWidth / 2
+        self.y = self.windowHeight / 2
 
-image = Image.new("RGBA", (windowWidth, windowHeight), (255, 255, 255, 0))
-draw = ImageDraw.Draw(image)
+        self.fontPath = "./font/CaviarDreams_Bold.ttf"
+        self.EightBitDragonDate = ImageFont.truetype(self.fontPath, 70)
+        self.EightBitDragonTime = ImageFont.truetype(self.fontPath, 270)
+        self.EightBitDragonSecond = ImageFont.truetype(self.fontPath, 70)
 
-fontPath = "./font/CaviarDreams_Bold.ttf"		#Path of the .ttf file
+        self.image = Image.new("RGBA", (self.windowWidth, self.windowHeight), (255, 255, 255, 0))
+        self.draw = ImageDraw.Draw(self.image)
 
-EightBitDragonDate = ImageFont.truetype(fontPath, 70)
-EightBitDragonTime = ImageFont.truetype(fontPath, 270)
-EightBitDragonSecond = ImageFont.truetype(fontPath, 70)
+        self.configure(bg="black")
+        self.canvas = tk.Canvas(self, width=self.windowWidth, height=2)
+        self.canvas.create_line(0, 0, self.windowWidth, 0, fill="#600000")
+        self.canvas.pack()
 
-root = tk.Tk()
-root.title("ClockPage") 
-root.geometry(f"{windowWidth}x{windowHeight}")	#setting windowsize for testing 
-root.attributes("-fullscreen", True)	#make the soft fullscreen
-root.configure(bg="black")
-canvas = tk.Canvas(root, width = windowWidth, height = 2)
-canvas.create_line(0, 0, windowWidth, 0, fill = "#600000")
+        self.clockLabel = tk.Label(self)
+        self.clockLabel.pack()
 
-clockLabel = tk.Label(root)
+        self.bind_all('<Escape>', self.close_window)
 
-clockLabel.pack()
+        self.after(100, self.updateTime)
 
-def drawClock(dayName, today, currentTime, currentSecond):
-    image = Image.new("RGBA", (windowWidth,windowHeight), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(image)
-   
-    draw.text((170, 70), f"{today} | {dayName}", font = EightBitDragonDate, fill = "#600000") #text(50,50) means the left upper corner is 50 pixcel down, 50 pixel left form bace picture's left upper corner
-    draw.text((50, 230), f"{currentTime}", font = EightBitDragonTime, fill = "#600000")
-    draw.text((900, 410), f"{currentSecond}", font = EightBitDragonSecond, fill = "#600000")
-    
-    return ImageTk.PhotoImage(image)
+    def drawClock(self, dayName, today, currentTime, currentSecond):
+        image = Image.new("RGBA", (self.windowWidth, self.windowHeight), (255, 255, 255, 0))
+        draw = ImageDraw.Draw(image)
 
-def updateTime():
-    draw.rectangle((0, 0, windowWidth, windowHeight), fill = (255, 255, 255, 0))
-    
-    dayName = time.strftime("%a")  #%A for Full day name (e.g., "Monday"), %a for short name(e.g., "Mon")
-    today = time.strftime("%Y/%m/%d")  #Date in yyyy-mm-dd format
-    currentTime = time.strftime("%H:%M")
-    currentSecond = time.strftime("%S")
-    
-    clockImage = drawClock(dayName, today, currentTime, currentSecond)
-    
-    # Update labels with new images 
-    clockLabel.config(image = clockImage)
-    clockLabel.image = clockImage
-    
-    # Schedule the next update
-    root.after(1000, updateTime)
+        draw.text((170, 70), f"{today} | {dayName}", font=self.EightBitDragonDate, fill="#600000")
+        draw.text((50, 230), f"{currentTime}", font=self.EightBitDragonTime, fill="#600000")
+        draw.text((900, 410), f"{currentSecond}", font=self.EightBitDragonSecond, fill="#600000")
 
-def close_window(event = None):
-    root.attributes('-fullscreen', False)  
-    root.destroy()
+        return ImageTk.PhotoImage(image)
 
-root.bind('<Escape>', close_window)
-updateTime()
-root.mainloop()
+    def updateTime(self):
+        self.draw.rectangle((0, 0, self.windowWidth, self.windowHeight), fill=(255, 255, 255, 0))
+
+        dayName = time.strftime("%a")
+        today = time.strftime("%Y/%m/%d")
+        currentTime = time.strftime("%H:%M")
+        currentSecond = time.strftime("%S")
+
+        self.clockImage = self.drawClock(dayName, today, currentTime, currentSecond)
+        self.clockLabel.config(image=self.clockImage)
+
+        self.after(1000, self.updateTime)
+
+    def close_window(self, event=None):
+        if self.controller:
+            self.controller.attributes('-fullscreen', False)
+            self.controller.destroy()

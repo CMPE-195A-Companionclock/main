@@ -6,7 +6,11 @@ import time
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 import requests
 
-APIKeyForWeatherAPI = "c526e7caac4c403e9f4212109242706"
+class WeatherScreen(tk.Frame):
+    def __init__(self, parent, controller=None):
+        super().__init__(parent)
+        self.controller = controller
+        APIKeyForWeatherAPI = "c526e7caac4c403e9f4212109242706"
     
 def getWeatherForecast(APIKey,days):
     weatherForecastURL = f"http://api.weatherapi.com/v1/forecast.json?key={APIKey}&q=auto:ip&days={days}"
@@ -118,10 +122,6 @@ def close_window(event = None):
     root.attributes('-fullscreen', False)  
     root.destroy()
 
-root.bind('<Escape>', close_window)
-
-updateWeather()
-root.mainloop()
 
 #if weatherForecastData:
 #    print("今日の天気")
