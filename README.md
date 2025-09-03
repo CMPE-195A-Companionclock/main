@@ -4,3 +4,5 @@
 4. Connect Putty
 5. Move the program file with Win SCP to the pi OS
 6. Use Real VNC Viwer to controll the PI os
+7. Install sox
+      sudo apt install -y alsa-utils sox
