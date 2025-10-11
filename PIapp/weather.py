@@ -1,12 +1,13 @@
 #http://api.weatherapi.com/v1 #base url for weather API
 #API key for weatherAPI= c526e7caac4c403e9f4212109242706
 
-import tkinter as tk
+import os
 import time
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 import requests
 
-APIKeyForWeatherAPI = "c526e7caac4c403e9f4212109242706"
+# Prefer environment variable if available
+APIKeyForWeatherAPI = os.getenv("WEATHERAPI_KEY", "c526e7caac4c403e9f4212109242706")
     
 def getWeatherForecast(APIKey,days):
     weatherForecastURL = f"http://api.weatherapi.com/v1/forecast.json?key={APIKey}&q=auto:ip&days={days}"
@@ -22,15 +23,17 @@ windowHeight = 600
 image = Image.new("RGBA", (windowWidth, windowHeight), (255, 255, 255, 0))
 draw = ImageDraw.Draw(image)
 
-fontPath = "./font/JiyunoTsubasa.ttf"
+_BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+fontPath = os.path.join(_BASE_DIR, "font", "JiyunoTsubasa.ttf")
 
 CustomFont = ImageFont.truetype(fontPath, 20)
 CustomFontSmall = ImageFont.truetype(fontPath, 17)
 
-def drawCurrentWather(weatherForecastData):
+def drawCurrentWather(weatherForecastData=None):
     image = Image.new("RGBA", (windowWidth,windowHeight), (255, 255, 255, 0))
     draw = ImageDraw.Draw(image)
-    weatherForecastData = getWeatherForecast(APIKeyForWeatherAPI, 3)
+    if weatherForecastData is None:
+        weatherForecastData = getWeatherForecast(APIKeyForWeatherAPI, 3)
     currentCityName = weatherForecastData['location']['name']
     CurrentStateName = weatherForecastData['location']['region']
     CurrentCountryName = weatherForecastData['location']['country']
@@ -102,26 +105,27 @@ def updateWeather():
 #    # Schedule the next update
     root.after(60000, updateWeather)
 
-root = tk.Tk()
-root.title("weatherPage")
-root.geometry(f"{windowWidth}x{windowHeight}")	#setting windowsize for testing 
-root.attributes("-fullscreen", True)	#make the soft fullscreen
-root.configure(bg="black")
-canvas = tk.Canvas(root, width = windowWidth, height = 2)
-canvas.create_line(0, 0, windowWidth, 0, fill = "#600000")
+if __name__ == "__main__":
+    import tkinter as tk
+    root = tk.Tk()
+    root.title("weatherPage")
+    root.geometry(f"{windowWidth}x{windowHeight}")
+    root.attributes("-fullscreen", True)
+    root.configure(bg="black")
+    canvas = tk.Canvas(root, width = windowWidth, height = 2)
+    canvas.create_line(0, 0, windowWidth, 0, fill = "#600000")
 
-weatherLabel = tk.Label(root)
+    weatherLabel = tk.Label(root)
+    weatherLabel.pack()
 
-weatherLabel.pack()
+    def close_window(event = None):
+        root.attributes('-fullscreen', False)  
+        root.destroy()
 
-def close_window(event = None):
-    root.attributes('-fullscreen', False)  
-    root.destroy()
+    root.bind('<Escape>', close_window)
 
-root.bind('<Escape>', close_window)
-
-updateWeather()
-root.mainloop()
+    updateWeather()
+    root.mainloop()
 
 #if weatherForecastData:
 #    print("今日の天気")

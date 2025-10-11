@@ -1,5 +1,8 @@
-geopy
+# Core runtime
 requests
 pillow
+pandas
+
+# Wake word (optional; required for PIapp/voiceRecognition.py)
 pvporcupine
 pvrecorder
