@@ -153,8 +153,10 @@ def _draw_text_centered(drw: ImageDraw.ImageDraw, rect, label: str, font):
     drw.text((tx, ty), label, font=font, fill=_COLOR)
 
 
+from typing import Optional, List, Set
+
 def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int = 1,
-               alarms: list | None = None, selected: int = 0, checked: set | None = None) -> ImageTk.PhotoImage:
+               alarms: Optional[List] = None, selected: int = 0, checked: Optional[Set] = None) -> ImageTk.PhotoImage:
     """Return an ImageTk.PhotoImage showing an alarm settings view with buttons."""
     img = Image.new("RGBA", (WINDOW_W, WINDOW_H), (255, 255, 255, 0))
     drw = ImageDraw.Draw(img)

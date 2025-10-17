@@ -1,7 +1,11 @@
 # Core runtime
 requests
 pillow
-pandas
+
+# Note: pandas/numpy are NOT required for the main UI.
+# If you want to use the CLI calendar DataFrame helper, install pandas separately.
+# On Raspberry Pi OS (legacy), prefer apt: sudo apt-get install python3-pandas
+# or a prebuilt wheel to avoid compiling numpy.
 
 # Wake word (optional; required for PIapp/voiceRecognition.py)
 pvporcupine
