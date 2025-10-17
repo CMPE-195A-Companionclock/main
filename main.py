@@ -80,12 +80,20 @@ def run_touch_ui(fullscreen: bool = True):
         import PIapp.weather as weather_mod
         from PIapp.calendarPage import draw_calendar_image as draw_calendar_page
         from PIapp.Alarm import draw_alarm as draw_alarm_page, get_layout as alarm_layout
+        from PIapp.voicePage import draw_voice_page, get_layout as voice_layout
     except Exception as e:
         print("Failed to import page modules (clock/weather/calendar/alarm).")
         print(f"Detail: {e}")
         return 1
 
     WINDOW_W, WINDOW_H = 1024, 600
+    # Resolve local tmp directory for recordings and ensure it exists
+    BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+    LOCAL_TMP = os.path.join(BASE_DIR, "PIapp", "tmp")
+    try:
+        os.makedirs(LOCAL_TMP, exist_ok=True)
+    except Exception:
+        pass
 
     root = tk.Tk()
     root.title("CompanionClock")
@@ -98,12 +106,14 @@ def run_touch_ui(fullscreen: bool = True):
     label.pack()
 
     # State
-    mode = {"view": "clock"}  # calendar | weather | clock | alarm (default: clock)
+    mode = {"view": "clock"}  # calendar | weather | clock | alarm | voice (default: clock)
     api_key: Optional[str] = os.getenv("WEATHERAPI_KEY")
     weather_data: Optional[dict] = None
     last_fetch = 0.0
     # Multiple alarms state
     alarms = {"items": [{"hour": 7, "minute": 0, "enabled": False}], "i": 0, "checked": set()}
+    # Voice test state (store under /tmp)
+    voice = {"status": "", "wav_path": "/tmp/in.wav", "busy": False}
 
     # Rendering separated from scheduling to avoid double timers
     def render():
@@ -118,6 +128,8 @@ def run_touch_ui(fullscreen: bool = True):
             tkimg = draw_alarm_page(cur["hour"], cur["minute"], cur.get("enabled", False) if isinstance(cur, dict) else False,
                                      index=alarms["i"]+1, total=len(alarms["items"]),
                                      alarms=alarms["items"], selected=alarms["i"], checked=alarms["checked"]) 
+        elif v == "voice":
+            tkimg = draw_voice_page(voice.get("status") or None)
         else:  # clock
             day_name = time.strftime("%a")
             today = time.strftime("%Y/%m/%d")
@@ -159,29 +171,29 @@ def run_touch_ui(fullscreen: bool = True):
     SWIPE_MAX_TIME = 0.8
     gesture = {"x": 0, "y": 0, "t": 0.0, "active": False}
 
+    PAGES = ["calendar", "clock", "weather", "voice"]  # left -> right order (exclude 'alarm')
+
     def next_view():
-        # One-step to the right from clock -> weather; from calendar -> clock; at weather, stay.
         v = mode["view"]
         if v == "alarm":
             return
-        if v == "clock":
-            mode["view"] = "weather"
-        elif v == "calendar":
-            mode["view"] = "clock"
-        else:  # weather
-            mode["view"] = "weather"
+        try:
+            i = PAGES.index(v)
+        except ValueError:
+            i = 1  # default to 'clock'
+        i = min(len(PAGES) - 1, i + 1)
+        mode["view"] = PAGES[i]
 
     def prev_view():
-        # One-step to the left from clock -> calendar; from weather -> clock; at calendar, stay.
         v = mode["view"]
         if v == "alarm":
             return
-        if v == "clock":
-            mode["view"] = "calendar"
-        elif v == "weather":
-            mode["view"] = "clock"
-        else:  # calendar
-            mode["view"] = "calendar"
+        try:
+            i = PAGES.index(v)
+        except ValueError:
+            i = 1
+        i = max(0, i - 1)
+        mode["view"] = PAGES[i]
 
     def on_press(evt):
         gesture["x"] = evt.x
@@ -199,16 +211,31 @@ def run_touch_ui(fullscreen: bool = True):
 
         if dt <= SWIPE_MAX_TIME and (abs(dx) >= SWIPE_MIN_DIST or abs(dy) >= SWIPE_MIN_DIST):
             if abs(dx) >= abs(dy):
-                if dx < 0:
-                    next_view()
-                else:
-                    prev_view()
+                # Horizontal: left swipe moves to the right neighbor (weather),
+                # right swipe moves to the left neighbor (calendar), only relative to clock.
+                if dx < 0:  # swipe left
+                    if mode["view"] == "clock":
+                        mode["view"] = "weather"
+                    elif mode["view"] == "calendar":
+                        mode["view"] = "clock"
+                else:  # swipe right
+                    if mode["view"] == "clock":
+                        mode["view"] = "calendar"
+                    elif mode["view"] == "weather":
+                        mode["view"] = "clock"
             else:
-                # Vertical swipe: up -> alarm, down -> clock
-                if dy < 0:
-                    mode["view"] = "alarm"
-                else:
-                    mode["view"] = "clock"
+                # Vertical: up swipe moves to the bottom neighbor (alarm),
+                # down swipe moves to the top neighbor (voice), only relative to clock.
+                if dy < 0:  # swipe up
+                    if mode["view"] == "clock":
+                        mode["view"] = "alarm"
+                    elif mode["view"] == "voice":
+                        mode["view"] = "clock"
+                else:  # swipe down
+                    if mode["view"] == "clock":
+                        mode["view"] = "voice"
+                    elif mode["view"] == "alarm":
+                        mode["view"] = "clock"
         else:
             # Tap gesture handling (short, small movement)
             if mode["view"] == "alarm":
@@ -283,6 +310,58 @@ def run_touch_ui(fullscreen: bool = True):
                         t = (cur["minute"] // 10 - 1) % 6
                         cur["minute"] = t*10 + o
                 render(); return
+                
+            elif mode["view"] == "voice":
+                x, y = evt.x, evt.y
+                def inside(rect):
+                    x1, y1, x2, y2 = rect
+                    return x1 <= x <= x2 and y1 <= y <= y2
+                layout = voice_layout()
+                if inside(layout.get('rec_btn', (0,0,0,0))):
+                    if not voice["busy"]:
+                        voice["busy"] = True
+                        voice["status"] = "Recording…"
+                        render()
+                        import threading, subprocess
+                        def _rec():
+                            # Record exactly as requested:
+                            # arecord -D hw:1,0 -f S16_LE -r 16000 -c 2 -d 5 /tmp/in.wav
+                            rec_cmd = [
+                                "arecord",
+                                "-D", "hw:1,0",
+                                "-f", "S16_LE",
+                                "-r", "16000",
+                                "-c", "2",
+                                "-d", "5",
+                                voice["wav_path"],
+                            ]
+                            try:
+                                subprocess.run(rec_cmd, check=True)
+                                voice["status"] = "Recorded"
+                            except Exception:
+                                voice["status"] = "Record error"
+                            finally:
+                                voice["busy"] = False
+                                root.after(0, render)
+                        threading.Thread(target=_rec, daemon=True).start()
+                        return
+                if inside(layout.get('play_btn', (0,0,0,0))):
+                    if not voice["busy"]:
+                        voice["busy"] = True
+                        voice["status"] = "Playing…"
+                        render()
+                        import threading, subprocess
+                        def _play():
+                            try:
+                                subprocess.run(["aplay", voice["wav_path"]], check=True)
+                                voice["status"] = "Played"
+                            except Exception:
+                                voice["status"] = "Play error"
+                            finally:
+                                voice["busy"] = False
+                                root.after(0, render)
+                        threading.Thread(target=_play, daemon=True).start()
+                        return
 
     def close_window(event=None):
         root.attributes('-fullscreen', False)
