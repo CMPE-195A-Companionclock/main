@@ -2,8 +2,16 @@ import calendar
 import time
 import os
 from datetime import datetime
-import pandas as pd
 from PIL import Image, ImageDraw, ImageFont, ImageTk
+
+# Pandas is optional and only used for the CLI helper that prints a DataFrame.
+# Avoid importing it at module import time so the main UI can run without numpy/pandas.
+try:
+    import pandas as pd  # type: ignore
+    _HAS_PANDAS = True
+except Exception:
+    pd = None  # type: ignore
+    _HAS_PANDAS = False
 
 thisYear = int(time.strftime("%Y"))
 thisMonth = int(time.strftime("%m"))
@@ -33,15 +41,24 @@ def generateCalendar(thisYear, thisMonth):
     if missingDaysFromNext < 7:
         fullCalendar.extend(nextMonthDays[:missingDaysFromNext])
         
-    df = pd.DataFrame({'Day': fullCalendar})
-    df['Year'] = thisYear
-    df['Month'] = thisMonth
-    df.loc[:missingDaysFromPrev - 1, 'Month'] = prevMonth
-    df.loc[len(fullCalendar) - missingDaysFromNext:, 'Month'] = nextMonth  
-    if nextMonth == 13:
-    	nextMonth = 1
-    
-    return df
+    if _HAS_PANDAS:
+        df = pd.DataFrame({'Day': fullCalendar})
+        df['Year'] = thisYear
+        df['Month'] = thisMonth
+        df.loc[:missingDaysFromPrev - 1, 'Month'] = prevMonth
+        df.loc[len(fullCalendar) - missingDaysFromNext:, 'Month'] = nextMonth
+        if nextMonth == 13:
+            nextMonth = 1
+        return df
+    else:
+        # Fallback: return a simple dict payload when pandas is unavailable
+        return {
+            'year': thisYear,
+            'month': thisMonth,
+            'days': fullCalendar,
+            'prevMonthPad': int(missingDaysFromPrev),
+            'nextMonthPad': int(missingDaysFromNext),
+        }
 
 
 
