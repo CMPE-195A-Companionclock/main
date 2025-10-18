@@ -115,6 +115,10 @@ def run_touch_ui(fullscreen: bool = True):
     # Voice test state (store under /tmp)
     voice = {"status": "", "wav_path": "/tmp/in.wav", "busy": False}
 
+    # Voice command inbox (simple file-based IPC with voiceRecognition.py)
+    VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", "/tmp/cc_voice_cmd.json")
+    voice_cmd_state = {"last_mtime": 0.0}
+
     # Rendering separated from scheduling to avoid double timers
     def render():
         nonlocal weather_data
@@ -163,6 +167,30 @@ def run_touch_ui(fullscreen: bool = True):
                     render()
                 root.after(0, _apply)
             threading.Thread(target=_do_fetch, daemon=True).start()
+
+        # Check for incoming voice command (from voiceRecognition.py)
+        try:
+            if os.path.exists(VOICE_CMD_PATH):
+                mt = os.path.getmtime(VOICE_CMD_PATH)
+                if mt > voice_cmd_state.get("last_mtime", 0):
+                    import json
+                    with open(VOICE_CMD_PATH, "r", encoding="utf-8") as f:
+                        payload = json.load(f)
+                    voice_cmd_state["last_mtime"] = mt
+                    if isinstance(payload, dict) and payload.get("cmd") == "goto":
+                        dest = str(payload.get("view", "")).lower()
+                        if dest in {"clock", "weather", "calendar", "alarm", "voice"}:
+                            mode["view"] = dest
+                            # show transient status on voice page
+                            if dest == "voice" and payload.get("text"):
+                                voice["status"] = payload.get("text")[:40]
+                    # delete after processing
+                    try:
+                        os.remove(VOICE_CMD_PATH)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         render()
         timer["id"] = root.after(1000, tick)
@@ -320,19 +348,21 @@ def run_touch_ui(fullscreen: bool = True):
                 if inside(layout.get('rec_btn', (0,0,0,0))):
                     if not voice["busy"]:
                         voice["busy"] = True
-                        voice["status"] = "Recording…"
+                        secs = os.getenv("VOICE_SEC", "10")
+                        voice["status"] = f"Recording… {secs}s"
                         render()
                         import threading, subprocess
                         def _rec():
-                            # Record exactly as requested:
-                            # arecord -D hw:1,0 -f S16_LE -r 16000 -c 2 -d 5 /tmp/in.wav
+                            # Record exactly as requested with configurable duration:
+                            # arecord -D hw:1,0 -f S16_LE -r 16000 -c 2 -d <secs> /tmp/in.wav
+                            secs_local = os.getenv("VOICE_SEC", "10")
                             rec_cmd = [
                                 "arecord",
                                 "-D", "hw:1,0",
                                 "-f", "S16_LE",
                                 "-r", "16000",
                                 "-c", "2",
-                                "-d", "5",
+                                "-d", secs_local,
                                 voice["wav_path"],
                             ]
                             try:

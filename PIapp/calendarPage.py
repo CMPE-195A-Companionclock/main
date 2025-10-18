@@ -111,7 +111,7 @@ def draw_calendar_image(width: int = 1024, height: int = 600, top_margin: int = 
     drw.text(((width - tw) // 2, 10 + top_margin), title, font=title_font, fill=_COLOR)
 
     cols, rows = 7, 6
-    grid_top = 50 + top_margin
+    grid_top = 110 + top_margin
     cell_w = width // cols
     cell_h = (height - grid_top) // rows
 
