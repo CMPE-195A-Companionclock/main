@@ -3,6 +3,7 @@ import sys
 import os
 import time
 from typing import Optional
+import requests
 
 
 def run_clock(windowed: bool = False):
@@ -356,18 +357,62 @@ def run_touch_ui(fullscreen: bool = True):
                             # Record exactly as requested with configurable duration:
                             # arecord -D hw:1,0 -f S16_LE -r 16000 -c 2 -d <secs> /tmp/in.wav
                             secs_local = os.getenv("VOICE_SEC", "10")
+                            arec_dev = os.getenv("ARECORD_CARD", os.getenv("VOICE_ARECORD_DEVICE", "plughw:1,0"))
                             rec_cmd = [
                                 "arecord",
-                                "-D", "hw:1,0",
+                                "-D", arec_dev,
                                 "-f", "S16_LE",
                                 "-r", "16000",
-                                "-c", "2",
+                                "-c", "1",
                                 "-d", secs_local,
                                 voice["wav_path"],
                             ]
                             try:
                                 subprocess.run(rec_cmd, check=True)
-                                voice["status"] = "Recorded"
+                                # After recording, optionally send to ASR server
+                                offline = os.getenv("VOICE_OFFLINE", "0") == "1"
+                                if offline:
+                                    voice["status"] = "Recorded (offline)"
+                                else:
+                                    voice["status"] = "Recognizing..."
+                                    try:
+                                        url = os.getenv("VOICE_SERVER_URL", os.getenv("SERVER_URL", "http://192.168.0.10:5000/transcribe"))
+                                        with open(voice["wav_path"], "rb") as fh:
+                                            r = requests.post(url, files={"audio": ("in.wav", fh, "audio/wav")}, timeout=30)
+                                        txt = ""
+                                        try:
+                                            j = r.json()
+                                            txt = (j.get("text") or "").strip()
+                                        except Exception:
+                                            txt = r.text[:80]
+                                        # Map recognized text to a target view
+                                        t = (txt or "").lower()
+                                        target = None
+                                        pairs = [
+                                            ("clock", ("clock", "時計", "クロック")),
+                                            ("weather", ("weather", "天気")),
+                                            ("calendar", ("calendar", "カレンダー")),
+                                            ("alarm", ("alarm", "アラーム")),
+                                            ("voice", ("voice", "ボイス", "録音")),
+                                        ]
+                                        for vname, keys in pairs:
+                                            for k in keys:
+                                                if k in t:
+                                                    target = vname
+                                                    break
+                                            if target:
+                                                break
+                                        def _apply_result():
+                                            voice["status"] = txt[:40] if txt else ""
+                                            if target:
+                                                mode["view"] = target
+                                            render()
+                                        root.after(0, _apply_result)
+                                    except Exception:
+                                        def _apply_err():
+                                            voice["status"] = "ASR error"
+                                            render()
+                                        root.after(0, _apply_err)
                             except Exception:
                                 voice["status"] = "Record error"
                             finally:

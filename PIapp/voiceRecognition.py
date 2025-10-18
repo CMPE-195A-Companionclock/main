@@ -18,12 +18,17 @@ except Exception:
 # ====== CONFIG ======
 ACCESS_KEY   = os.getenv("PICOVOICE_ACCESS_KEY")  # Set your Picovoice AccessKey via env var
 SERVER_URL   = "http://192.168.0.10:5000/transcribe"  # <-- change to your PC's Flask URL
-ARECORD_CARD = "hw:1,0"        # ALSA device for ReSpeaker (adjust with `arecord -l`)
+ARECORD_CARD = os.getenv("ARECORD_CARD", "plughw:1,0")  # Use plughw for resampling; override via env
 DEVICE_INDEX = int(os.getenv("PVREC_DEVICE_INDEX", "0"))  # pvrecorder input device index
 # Built-in wake-words to use when no custom KEYWORD paths are available
 KEYWORDS     = ["jarvis"]
-# Optional custom Porcupine keyword model paths (.ppn)
-KEYWORD      = [os.path.expanduser("~/keyword/Companion-Clock_en_raspberry-pi_v3_0_0.ppn")]
+# Optional custom Porcupine keyword model paths (.ppn).
+# Try both home directory and the repo-local PIapp/keyword path by default.
+_LOCAL_KWD = os.path.join(os.path.dirname(__file__), "keyword", "Companion-Clock_en_raspberry-pi_v3_0_0.ppn")
+KEYWORD      = [
+    os.path.expanduser("~/keyword/Companion-Clock_en_raspberry-pi_v3_0_0.ppn"),
+    _LOCAL_KWD,
+]
 SENSITIVITY  = float(os.getenv("PORCUPINE_SENSITIVITY", "0.65"))  # 0.1..0.9 (higher = more sensitive)
 RECORD_SEC   = 5               # seconds to record after wake word
 COOLDOWN_SEC = 1.5             # ignore new triggers for this long after each detection
@@ -118,7 +123,7 @@ def record_wav(path: str):
         "-D", ARECORD_CARD,
         "-f", "S16_LE",
         "-r", "16000",
-        "-c", "2",
+        "-c", "1",
         "-d", str(RECORD_SEC),
         path
     ], check=True)
