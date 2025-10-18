@@ -2,6 +2,12 @@ import os, tempfile, subprocess, json
 from flask import Flask, request, jsonify
 from faster_whisper import WhisperModel
 
+# Optional: Gemini for NLU/post-processing
+try:
+    import google.generativeai as genai  # type: ignore
+except Exception:  # pragma: no cover
+    genai = None  # type: ignore
+
 # ===== Load Whisper model =====
 DEVICE = "cuda" if os.environ.get("FORCE_CPU","0")!="1" and \
                  os.environ.get("CUDA_VISIBLE_DEVICES","")!="" else "cpu"
@@ -14,6 +20,44 @@ COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"  # GPU uses float16 (fa
 model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
 
 app = Flask(__name__)
+
+# Configure Gemini (optional)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash").strip()
+GEMINI_SYSTEM = os.environ.get(
+    "GEMINI_SYSTEM",
+    (
+        "You are an NLU that returns compact JSON only. "
+        "Given a user's Japanese text, decide if it requests navigating to a page. "
+        "Return JSON: {\"intent\": one of [\"goto\", \"smalltalk\", \"none\"], "
+        "\"view\": one of [\"clock\",\"weather\",\"calendar\",\"alarm\",\"voice\"] or null, "
+        "\"reply\": optional short response}."
+    ),
+)
+
+_gemini_model = None
+if GEMINI_API_KEY and genai:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        _gemini_model = genai.GenerativeModel(GEMINI_MODEL, system_instruction=GEMINI_SYSTEM)
+    except Exception:
+        _gemini_model = None
+
+def run_gemini_nlu(text: str):
+    if not text or not _gemini_model:
+        return None
+    try:
+        resp = _gemini_model.generate_content(text)
+        out = getattr(resp, "text", None) or ""
+        if not out:
+            return None
+        # Try parse JSON, fallback to string
+        try:
+            return json.loads(out)
+        except Exception:
+            return {"intent": "none", "reply": out}
+    except Exception:
+        return None
 
 def to_mono16k(in_path):
     """Convert to 16 kHz mono with ffmpeg. If ffmpeg is unavailable, return the original file."""
@@ -52,6 +96,34 @@ def transcribe():
             "duration": info.duration,
             "text": "".join(text_chunks).strip(),
             "segments": segs
+        })
+    finally:
+        try:
+            os.remove(tmp_path)
+            if conv_path != tmp_path: os.remove(conv_path)
+        except Exception:
+            pass
+
+@app.route("/transcribe_nlu", methods=["POST"])
+def transcribe_nlu():
+    if "audio" not in request.files:
+        return jsonify({"error":"audio file missing (multipart/form-data, field name 'audio')"}), 400
+
+    f = request.files["audio"]
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=os.path.splitext(f.filename or "in.wav")[1] or ".wav")
+    os.close(tmp_fd)
+    f.save(tmp_path)
+
+    conv_path = to_mono16k(tmp_path)
+    try:
+        segments, info = model.transcribe(conv_path, language="ja", vad_filter=True)
+        text = "".join(s.text for s in segments).strip()
+        nlu = run_gemini_nlu(text)
+        return jsonify({
+            "language": info.language,
+            "duration": info.duration,
+            "text": text,
+            "nlu": nlu,
         })
     finally:
         try:
