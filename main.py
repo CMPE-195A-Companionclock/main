@@ -1,5 +1,4 @@
 import argparse
-import sys
 import os
 import time
 from typing import Optional
@@ -127,7 +126,7 @@ def run_touch_ui(fullscreen: bool = True):
         if v == "calendar":
             tkimg = draw_calendar_page(WINDOW_W, WINDOW_H, top_margin=24)
         elif v == "weather":
-            tkimg = weather_mod.drawCurrentWather(weather_data)
+            tkimg = weather_mod.drawCurrentWeather(weather_data)
         elif v == "alarm":
             cur = alarms["items"][alarms["i"]]
             tkimg = draw_alarm_page(cur["hour"], cur["minute"], cur.get("enabled", False) if isinstance(cur, dict) else False,
