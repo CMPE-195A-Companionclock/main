@@ -76,13 +76,19 @@ if __name__ == "__main__":
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 _FONT_PATH = os.path.join(_BASE_DIR, "font", "CaviarDreams_Bold.ttf")
 _COLOR = "#600000"
+_FONT_CACHE = {}
 
 
 def _font(size: int):
+    f = _FONT_CACHE.get(size)
+    if f is not None:
+        return f
     try:
-        return ImageFont.truetype(_FONT_PATH, size)
+        f = ImageFont.truetype(_FONT_PATH, size)
     except Exception:
-        return ImageFont.load_default()
+        f = ImageFont.load_default()
+    _FONT_CACHE[size] = f
+    return f
 
 
 def draw_calendar_image(width: int = 1024, height: int = 600, top_margin: int = 20):

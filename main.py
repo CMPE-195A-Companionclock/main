@@ -118,22 +118,59 @@ def run_touch_ui(fullscreen: bool = True):
     # Voice command inbox (simple file-based IPC with voiceRecognition.py)
     VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", "/tmp/cc_voice_cmd.json")
     voice_cmd_state = {"last_mtime": 0.0}
+    view_state = {"last": None}
+    # Simple render cache per page (avoid redrawing unchanged)
+    cache = {
+        "weather": {"img": None, "stamp": None},
+        "calendar": {"img": None, "ym": None},
+        "alarm": {"img": None, "sig": None},
+        "voice": {"img": None, "status": None},
+    }
 
     # Rendering separated from scheduling to avoid double timers
     def render():
         nonlocal weather_data
         v = mode["view"]
         if v == "calendar":
-            tkimg = draw_calendar_page(WINDOW_W, WINDOW_H, top_margin=24)
+            ym = time.strftime("%Y-%m")
+            if cache["calendar"]["img"] is None or cache["calendar"]["ym"] != ym:
+                tkimg = draw_calendar_page(WINDOW_W, WINDOW_H, top_margin=24)
+                cache["calendar"]["img"], cache["calendar"]["ym"] = tkimg, ym
+            else:
+                tkimg = cache["calendar"]["img"]
         elif v == "weather":
-            tkimg = weather_mod.drawCurrentWeather(weather_data)
+            stamp = None
+            try:
+                if isinstance(weather_data, dict):
+                    stamp = weather_data.get("current", {}).get("last_updated")
+            except Exception:
+                stamp = None
+            if cache["weather"]["img"] is None or cache["weather"]["stamp"] != stamp:
+                tkimg = weather_mod.drawCurrentWeather(weather_data)
+                cache["weather"]["img"], cache["weather"]["stamp"] = tkimg, stamp
+            else:
+                tkimg = cache["weather"]["img"]
         elif v == "alarm":
             cur = alarms["items"][alarms["i"]]
-            tkimg = draw_alarm_page(cur["hour"], cur["minute"], cur.get("enabled", False) if isinstance(cur, dict) else False,
-                                     index=alarms["i"]+1, total=len(alarms["items"]),
-                                     alarms=alarms["items"], selected=alarms["i"], checked=alarms["checked"]) 
+            sig = (
+                tuple((a.get('hour',0), a.get('minute',0), a.get('enabled',False)) for a in alarms['items']),
+                alarms['i'],
+                tuple(sorted(list(alarms['checked'])))
+            )
+            if cache["alarm"]["img"] is None or cache["alarm"]["sig"] != sig:
+                tkimg = draw_alarm_page(cur["hour"], cur["minute"], cur.get("enabled", False) if isinstance(cur, dict) else False,
+                                        index=alarms["i"]+1, total=len(alarms["items"]),
+                                        alarms=alarms["items"], selected=alarms["i"], checked=alarms["checked"]) 
+                cache["alarm"]["img"], cache["alarm"]["sig"] = tkimg, sig
+            else:
+                tkimg = cache["alarm"]["img"]
         elif v == "voice":
-            tkimg = draw_voice_page(voice.get("status") or None)
+            status = voice.get("status") or ""
+            if cache["voice"]["img"] is None or cache["voice"]["status"] != status:
+                tkimg = draw_voice_page(status)
+                cache["voice"]["img"], cache["voice"]["status"] = tkimg, status
+            else:
+                tkimg = cache["voice"]["img"]
         else:  # clock
             day_name = time.strftime("%a")
             today = time.strftime("%Y/%m/%d")
@@ -142,14 +179,15 @@ def run_touch_ui(fullscreen: bool = True):
             tkimg = draw_clock_page(day_name, today, current_time, current_sec)
         label.config(image=tkimg)
         label.image = tkimg
+        view_state["last"] = v
 
     timer = {"id": None}
     weather_fetching = {"busy": False}
 
     def tick():
         nonlocal last_fetch, weather_data
-        # Schedule weather refresh without blocking UI
         now = time.time()
+        # Schedule weather refresh without blocking UI
         if api_key and (now - last_fetch > 600 or weather_data is None) and not weather_fetching["busy"]:
             weather_fetching["busy"] = True
             import threading
@@ -164,13 +202,17 @@ def run_touch_ui(fullscreen: bool = True):
                     weather_data = data
                     last_fetch = time.time()
                     weather_fetching["busy"] = False
-                    render()
+                    if mode["view"] == "weather":
+                        render()
                 root.after(0, _apply)
             threading.Thread(target=_do_fetch, daemon=True).start()
 
         # Check for incoming voice command (from voiceRecognition.py)
+        # Throttle voice command polling unless on voice page
+        VOICE_POLL_EVERY = 2.0
+        voice_poll_ok = (mode["view"] == "voice") or (now - voice_cmd_state.get("last_check", 0.0) > VOICE_POLL_EVERY)
         try:
-            if os.path.exists(VOICE_CMD_PATH):
+            if voice_poll_ok and os.path.exists(VOICE_CMD_PATH):
                 mt = os.path.getmtime(VOICE_CMD_PATH)
                 if mt > voice_cmd_state.get("last_mtime", 0):
                     import json
@@ -189,10 +231,14 @@ def run_touch_ui(fullscreen: bool = True):
                         os.remove(VOICE_CMD_PATH)
                     except Exception:
                         pass
+            if voice_poll_ok:
+                voice_cmd_state["last_check"] = now
         except Exception:
             pass
 
-        render()
+        # Render when on clock every tick, or when view changed
+        if mode["view"] == "clock" or view_state.get("last") != mode.get("view"):
+            render()
         timer["id"] = root.after(1000, tick)
 
     SWIPE_MIN_DIST = 80
