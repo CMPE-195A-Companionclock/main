@@ -1,0 +1,4 @@
+flask
+faster-whisper
+ffmpeg-python
+google-generativeai
