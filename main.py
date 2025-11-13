@@ -62,6 +62,7 @@ def main(argv=None):
 
 # ================= Touch-enabled main UI =================
 def run_touch_ui(fullscreen: bool = True):
+    from PIapp.tts import speak
     try:
         import tkinter as tk
     except Exception as e:
@@ -104,6 +105,11 @@ def run_touch_ui(fullscreen: bool = True):
 
     label = tk.Label(root)
     label.pack()
+
+    try:
+        speak("Companion Clock is ready.")
+    except Exception as e:
+        print("TTS startup error:", e)
 
     # State
     mode = {"view": "clock"}  # calendar | weather | clock | alarm | voice (default: clock)
@@ -202,6 +208,16 @@ def run_touch_ui(fullscreen: bool = True):
                     weather_data = data
                     last_fetch = time.time()
                     weather_fetching["busy"] = False
+                    if mode["view"] == "weather" and isinstance(weather_data, dict):
+                        try:
+                            city = weather_data.get("location", {}).get("name", "")
+                            cond = weather_data.get("current", {}).get("condition", {}).get("text", "")
+                            temp = weather_data.get("current", {}).get("temp_c", None)
+                            if city and cond and temp is not None:
+                                speak(f"The weather in {city} is {cond}, {int(temp)} degrees Celsius.")
+                        except Exception as e:
+                            print("TTS weather summary error:", e)
+
                     if mode["view"] == "weather":
                         render()
                 root.after(0, _apply)
@@ -241,12 +257,13 @@ def run_touch_ui(fullscreen: bool = True):
             render()
         timer["id"] = root.after(1000, tick)
 
+    #Gestures
     SWIPE_MIN_DIST = 80
     SWIPE_MAX_TIME = 0.8
     gesture = {"x": 0, "y": 0, "t": 0.0, "active": False}
 
     PAGES = ["calendar", "clock", "weather", "voice"]  # left -> right order (exclude 'alarm')
-
+    
     def next_view():
         v = mode["view"]
         if v == "alarm":
@@ -491,6 +508,7 @@ def run_touch_ui(fullscreen: bool = True):
     label.bind('<ButtonRelease-1>', on_release)
     root.bind('<Escape>', close_window)
 
+    render()
     tick()
     root.mainloop()
     return 0
