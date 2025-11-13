@@ -17,7 +17,8 @@ except Exception:
 
 # ====== CONFIG ======
 ACCESS_KEY   = os.getenv("PICOVOICE_ACCESS_KEY")  # Set your Picovoice AccessKey via env var
-SERVER_URL   = "http://192.168.0.10:5000/transcribe"  # <-- change to your PC's Flask URL
+PC_SERVER    = os.getenv("PC_SERVER", "http://10.0.0.111:5000")  # <-- change to your PC's Flask URL
+TRANSCRIBE_EP = f"{PC_SERVER}/transcribe_nlu"
 ARECORD_CARD = os.getenv("ARECORD_CARD", "plughw:1,0")  # Use plughw for resampling; override via env
 DEVICE_INDEX = int(os.getenv("PVREC_DEVICE_INDEX", "0"))  # pvrecorder input device index
 # Built-in wake-words to use when no custom KEYWORD paths are available
@@ -133,35 +134,68 @@ def send_to_server(path: str) -> str:
 
     Returns empty text to indicate no transcription performed.
     """
+    if OFFLINE_ONLY:
+        try:
+            size = os.path.getsize(path)
+        except Exception:
+            size = -1
+        print(f"[voice] OFFLINE: saved at {path} (size={size}). Skipping server.")
+        return ""
     try:
-        size = os.path.getsize(path)
-    except Exception:
-        size = -1
-    print(f"Offline mode: recorded file saved at {path} (size={size} bytes). Skipping server.")
-    return ""
+        with open(path, "rb") as f:
+            resp = requests.post(TRANSCRIBE_EP, files={"audio": f}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        text = (data.get("text") or "").strip()
+        nlu  = data.get("nlu") or {"intent": "none"}
 
+        # Write a command file for the Tk UI to pick up
+        # (UI poller will delete the file after consuming)
+        payload = {"nlu": nlu}
+        intent = (nlu.get("intent") or "").lower()
+        if intent == "goto" and nlu.get("view"):
+            payload.update({"cmd": "goto", "view": nlu["view"]})
+        elif intent == "set_alarm" and nlu.get("alarm_time"):
+            payload.update({"cmd": "set_alarm", "time": nlu["alarm_time"]})
 
-def _map_text_to_view(text: str) -> Optional[str]:
-    """Very simple keyword mapping from ASR text to a target view.
+        # Write the command file for the UI to read
+        try:
+            with open(VOICE_CMD_PATH, "w", encoding="utf-8") as g:
+                json.dump(payload, g, ensure_ascii=False)
+            print("[voice] wrote UI payload:", payload)
+        except Exception as e:
+            print("[voice] could not write VOICE_CMD_PATH:", e)
 
-    Returns one of: 'clock', 'weather', 'calendar', 'alarm', 'voice' or None.
-    """
-    t = text.strip().lower()
-    if not t:
-        return None
-    # Japanese/English keywords
-    pairs = [
-        ("clock", ("clock", "ã‚¯ãƒ­ãƒƒã‚¯", "æ™‚è¨ˆ")),
-        ("weather", ("weather", "å¤©æ°—", "ã¦ã‚“ã")),
-        ("calendar", ("calendar", "ã‚«ãƒ¬ãƒ³ãƒ€ãƒ¼", "äºˆå®š")),
-        ("alarm", ("alarm", "ã‚¢ãƒ©ãƒ¼ãƒ ")),
-        ("voice", ("voice", "ãƒœã‚¤ã‚¹", "éŒ²éŸ³")),
-    ]
-    for view, keys in pairs:
-        for k in keys:
-            if k in t:
-                return view
-    return None
+        return text
+
+    except requests.RequestException as e:
+        print(f"[voice] HTTP error posting audio: {e}")
+        return ""
+    except Exception as e:
+        print(f"[voice] Unexpected error posting audio: {e}")
+        return ""
+
+# def _map_text_to_view(text: str) -> Optional[str]:
+#     """Very simple keyword mapping from ASR text to a target view.
+
+#     Returns one of: 'clock', 'weather', 'calendar', 'alarm', 'voice' or None.
+#     """
+#     t = text.strip().lower()
+#     if not t:
+#         return None
+#     # Japanese/English keywords
+#     pairs = [
+#         ("clock", ("clock", "ã‚¯ãƒ­ãƒƒã‚¯", "æ™‚è¨ˆ")),
+#         ("weather", ("weather", "å¤©æ°—", "ã¦ã‚“ã")),
+#         ("calendar", ("calendar", "ã‚«ãƒ¬ãƒ³ãƒ€ãƒ¼", "äºˆå®š")),
+#         ("alarm", ("alarm", "ã‚¢ãƒ©ãƒ¼ãƒ ")),
+#         ("voice", ("voice", "ãƒœã‚¤ã‚¹", "éŒ²éŸ³")),
+#     ]
+#     for view, keys in pairs:
+#         for k in keys:
+#             if k in t:
+#                 return view
+#     return None
 
 
 def _emit_ui_command(view: str, heard_text: str = ""):
