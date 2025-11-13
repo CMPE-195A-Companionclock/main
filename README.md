@@ -71,3 +71,41 @@ Troubleshooting
 6. Move the program file with Win SCP to the pi OS
 7. Use Real VNC Viwer to controll the PI os
 8. See https://docs.keyestudio.com/projects/KS0314/en/latest/docs/KS0314.html for installing the driver of the mic
+
+________________________________________________________________________
+Text-to-Speech (TTS) Integration
+This service supports two engines:
+Coqui-TTS (default) — offline, high-quality.
+Edge-TTS — online (Microsoft voice), returns MP3 which is converted to WAV.
+
+Setup
+----------------------
+1) Install runtime dependencies
+Python: 3.9–3.12 tested
+FFmpeg: required on the machine running the Flask server
+Windows: install from ffmpeg.org and add bin to PATH
+macOS: brew install ffmpeg
+Linux: sudo apt-get install ffmpeg
+
+2) Python packages
+pip install -r PCapp/requirements_PC.txt
+
+3) Pick the TTS engine (env vars)
+Default engine:
+set TTS_ENGINE=coqui # Windows PowerShell: $env:TTS_ENGINE="coqui"
+
+Coqui model (list with tts --list_models):
+set COQUI_MODEL=tts_models/en/ljspeech/tacotron2-DDC
+
+4) Run the server
+
+5) Generate audio
+Coqui (WAV, already normalized to mono 16 kHz):
+curl -o out.wav "http://<HOST>:5000/tts?text=Hello+from+Coqui&engine=coqui"
+
+Edge-TTS (converted MP3→WAV):
+curl -o out.wav "http://<HOST>:5000/tts?text=Hello+from+Edge&engine=edge&voice=en-US-JennyNeural"
+
+6) Raspberry Pi playback
+aplay out.wav
+________________________________________________________________________
