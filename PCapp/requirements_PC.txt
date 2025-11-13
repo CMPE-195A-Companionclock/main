@@ -2,3 +2,11 @@ flask
 faster-whisper
 ffmpeg-python
 google-generativeai
+#tts engines
+coqui-tts==0.25.3
+soundfile==0.13.1
+edge-tts>=6.1.12
+
+#Coqui runtime constraint
+numpy<2.1,>=1.26
+spacy<3.8
