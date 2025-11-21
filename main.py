@@ -1,9 +1,10 @@
-import argparse
-import os
-import time
+import argparse, os, time, tempfile
 from typing import Optional
 import requests
+from PIapp.voiceRecognition import get_intent
+from app_router import goto_view, schedule_alarm
 
+VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", os.path.join(tempfile.gettempdir(), "cc_voice_cmd.json"))
 
 def run_clock(windowed: bool = False):
     from PIapp.clock import run
@@ -25,6 +26,23 @@ def show_calendar():
     from PIapp.calendarPage import main as cal_main
     cal_main()
 
+def route_intent(intent: dict):
+    it = (intent or {}).get("intent")
+    if it == "goto":
+        view = (intent.get("view") or "").lower()
+        goto_view(view if view in {"clock","weather","calendar","alarm","voice"} else "clock")
+    elif it == "set_alarm":
+        t = intent.get("alarm_time")
+        if t:
+            try:
+                schedule_alarm(t)
+            except Exception as e:
+                print("Failed to schedule alarm:", e)
+
+def handle_recognized_text(text: str):
+    intent = get_intent(text)
+    print("NLU:", intent)
+    route_intent(intent)
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="CompanionClock launcher")
@@ -33,16 +51,15 @@ def main(argv=None):
     p_clock = sub.add_parser("clock", help="Run clock UI")
     p_clock.add_argument("--windowed", action="store_true", help="Run windowed (not fullscreen)")
 
-    sub.add_parser("voice", help="Run voice recognition (wake word -> record -> send)")
-    sub.add_parser("server", help="Run PC-side ASR server (Flask + faster-whisper)")
-    sub.add_parser("calendar", help="Print generated calendar DataFrame for the current month")
+    sub.add_parser("voice",   help="Run voice recognition (wake word -> record -> send)")
+    sub.add_parser("server",  help="Run PC-side ASR server (Flask + faster-whisper)")
+    sub.add_parser("calendar",help="Print generated calendar DataFrame for the current month")
     p_ui = sub.add_parser("ui", help="Run touch-enabled main UI (default)")
     p_ui.add_argument("--windowed", action="store_true", help="Run windowed (not fullscreen)")
 
     args = parser.parse_args(argv)
 
     if args.cmd is None:
-        # Default: run touch-enabled main UI
         return run_touch_ui(fullscreen=True)
     if args.cmd == "clock":
         run_clock(windowed=args.windowed)
@@ -55,14 +72,13 @@ def main(argv=None):
     elif args.cmd == "ui":
         return run_touch_ui(fullscreen=not args.windowed)
     else:
-        parser.print_help()
-        return 2
+        parser.print_help(); return 2
     return 0
 
+print("UI VOICE_CMD_PATH:", VOICE_CMD_PATH)
 
-# ================= Touch-enabled main UI =================
 def run_touch_ui(fullscreen: bool = True):
-    from PIapp.tts import speak
+    from PIapp.pi_tts import speak
     try:
         import tkinter as tk
     except Exception as e:
@@ -118,11 +134,12 @@ def run_touch_ui(fullscreen: bool = True):
     last_fetch = 0.0
     # Multiple alarms state
     alarms = {"items": [{"hour": 7, "minute": 0, "enabled": False}], "i": 0, "checked": set()}
+    RANG_RECENT = set()
+    _last_date = {"d": time.strftime("%Y-%m-%d")}
     # Voice test state (store under /tmp)
     voice = {"status": "", "wav_path": "/tmp/in.wav", "busy": False}
 
     # Voice command inbox (simple file-based IPC with voiceRecognition.py)
-    VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", "/tmp/cc_voice_cmd.json")
     voice_cmd_state = {"last_mtime": 0.0}
     view_state = {"last": None}
     # Simple render cache per page (avoid redrawing unchanged)
@@ -193,6 +210,11 @@ def run_touch_ui(fullscreen: bool = True):
     def tick():
         nonlocal last_fetch, weather_data
         now = time.time()
+        today = time.strftime("%Y-%m-%d")
+        if today != _last_date["d"]:
+            RANG_RECENT.clear()
+            _last_date["d"] = today
+
         # Schedule weather refresh without blocking UI
         if api_key and (now - last_fetch > 600 or weather_data is None) and not weather_fetching["busy"]:
             weather_fetching["busy"] = True
@@ -208,16 +230,6 @@ def run_touch_ui(fullscreen: bool = True):
                     weather_data = data
                     last_fetch = time.time()
                     weather_fetching["busy"] = False
-                    if mode["view"] == "weather" and isinstance(weather_data, dict):
-                        try:
-                            city = weather_data.get("location", {}).get("name", "")
-                            cond = weather_data.get("current", {}).get("condition", {}).get("text", "")
-                            temp = weather_data.get("current", {}).get("temp_c", None)
-                            if city and cond and temp is not None:
-                                speak(f"The weather in {city} is {cond}, {int(temp)} degrees Celsius.")
-                        except Exception as e:
-                            print("TTS weather summary error:", e)
-
                     if mode["view"] == "weather":
                         render()
                 root.after(0, _apply)
@@ -225,6 +237,7 @@ def run_touch_ui(fullscreen: bool = True):
 
         # Check for incoming voice command (from voiceRecognition.py)
         # Throttle voice command polling unless on voice page
+        # Command file polling (support single object or list)
         VOICE_POLL_EVERY = 2.0
         voice_poll_ok = (mode["view"] == "voice") or (now - voice_cmd_state.get("last_check", 0.0) > VOICE_POLL_EVERY)
         try:
@@ -235,24 +248,59 @@ def run_touch_ui(fullscreen: bool = True):
                     with open(VOICE_CMD_PATH, "r", encoding="utf-8") as f:
                         payload = json.load(f)
                     voice_cmd_state["last_mtime"] = mt
-                    if isinstance(payload, dict) and payload.get("cmd") == "goto":
-                        dest = str(payload.get("view", "")).lower()
-                        if dest in {"clock", "weather", "calendar", "alarm", "voice"}:
-                            mode["view"] = dest
-                            # show transient status on voice page
-                            if dest == "voice" and payload.get("text"):
-                                voice["status"] = payload.get("text")[:40]
-                    # delete after processing
-                    try:
-                        os.remove(VOICE_CMD_PATH)
-                    except Exception:
-                        pass
+
+                    cmds = payload if isinstance(payload, list) else [payload]
+                    for payload in cmds:
+                        if not isinstance(payload, dict):
+                            continue
+                        cmd = str(payload.get("cmd", "")).lower()
+
+                        if cmd == "goto":
+                            dest = str(payload.get("view", "")).lower()
+                            if dest in {"clock","weather","calendar","alarm","voice"}:
+                                mode["view"] = dest
+                                if dest == "voice" and payload.get("text"):
+                                    voice["status"] = str(payload.get("text"))[:40]
+
+                        elif cmd == "set_alarm":
+                            hhmm = str(payload.get("time", "")).strip()
+                            try:
+                                h, m = [int(x) for x in hhmm.split(":", 1)]
+                                key = (h, m)
+                                if not any((a.get("hour"), a.get("minute")) == key for a in alarms["items"]):
+                                    alarms["items"].append({"hour": h, "minute": m, "enabled": True})
+                                    alarms["i"] = len(alarms["items"]) - 1
+                                    mode["view"] = "alarm"
+                            except Exception:
+                                pass
+
+                            goto = payload.get("goto")
+                            if goto in {"clock","weather","calendar","alarm","voice"}:
+                                mode["view"] = goto
+
+                    try: os.remove(VOICE_CMD_PATH)
+                    except Exception: pass
+
             if voice_poll_ok:
                 voice_cmd_state["last_check"] = now
         except Exception:
             pass
 
-        # Render when on clock every tick, or when view changed
+        # Ring alarms when time matches
+        try:
+            now_h = int(time.strftime("%H")); now_m = int(time.strftime("%M"))
+            today = time.strftime("%Y-%m-%d")
+            for a in list(alarms["items"]):
+                if not a.get("enabled"): continue
+                key = (today, a.get("hour",0), a.get("minute",0))
+                if key in RANG_RECENT: continue
+                if a.get("hour")==now_h and a.get("minute")==now_m:
+                    try: speak("Alarm ringing.")
+                    except Exception as e: print("TTS alarm error:", e)
+                    RANG_RECENT.add(key)
+        except Exception:
+            pass
+
         if mode["view"] == "clock" or view_state.get("last") != mode.get("view"):
             render()
         timer["id"] = root.after(1000, tick)
@@ -417,7 +465,7 @@ def run_touch_ui(fullscreen: bool = True):
                         import threading, subprocess
                         def _rec():
                             # Record exactly as requested with configurable duration:
-                            # arecord -D hw:1,0 -f S16_LE -r 16000 -c 2 -d <secs> /tmp/in.wav
+                            # arecord -D hw:1,0 -f S16_LE -r 16000 -c 1 -d <secs> /tmp/in.wav
                             secs_local = os.getenv("VOICE_SEC", "10")
                             arec_dev = os.getenv("ARECORD_CARD", os.getenv("VOICE_ARECORD_DEVICE", "plughw:1,0"))
                             rec_cmd = [
@@ -499,6 +547,62 @@ def run_touch_ui(fullscreen: bool = True):
                                 root.after(0, render)
                         threading.Thread(target=_play, daemon=True).start()
                         return
+    # Hook voice page buttons to server:
+    def voice_hooks():
+        import threading, subprocess
+        from PIapp.voicePage import get_layout as voice_layout
+        def inside(rect, x, y):
+            x1, y1, x2, y2 = rect; return x1 <= x <= x2 and y1 <= y <= y2
+        layout = voice_layout()
+
+        def on_press(evt): pass
+        def on_release(evt):
+            x, y = evt.x, evt.y
+            if inside(layout.get('rec_btn',(0,0,0,0)), x, y):
+                if voice["busy"]: return
+                voice["busy"] = True
+                secs = os.getenv("VOICE_SEC", "10")
+                voice["status"] = f"Recording… {secs}s"; render()
+                def _rec():
+                    secs_local = os.getenv("VOICE_SEC", "10")
+                    arec_dev = os.getenv("ARECORD_CARD", os.getenv("VOICE_ARECORD_DEVICE", "plughw:1,0"))
+                    rec_cmd = ["arecord","-D", arec_dev,"-f","S16_LE","-r","16000","-c","1","-d", secs_local, voice["wav_path"]]
+                    try:
+                        subprocess.run(rec_cmd, check=True)
+                        # Send to server
+                        url = os.getenv("VOICE_SERVER_URL", os.getenv("SERVER_URL", "http://127.0.0.1:5000/transcribe"))
+                        voice["status"] = "Recognizing..."; render()
+                        with open(voice["wav_path"], "rb") as fh:
+                            r = requests.post(url, files={"audio": ("in.wav", fh, "audio/wav")}, timeout=60)
+                        j = r.json() if r.headers.get("content-type","").startswith("application/json") else {}
+                        txt = (j.get("text") or "").strip()
+                        nlu = j.get("nlu") or {}
+                        # Drive UI via router (file IPC) based on server NLU
+                        intent = nlu.get("intent")
+                        if intent == "set_alarm" and nlu.get("alarm_time"):
+                            schedule_alarm(nlu["alarm_time"])
+                        elif intent == "goto" and (nlu.get("view") in {"clock","weather","calendar","alarm","voice"}):
+                            goto_view(nlu["view"])
+                        voice["status"] = txt[:40] if txt else ""
+                    except Exception:
+                        voice["status"] = "ASR error"
+                    finally:
+                        voice["busy"] = False
+                        render()
+                threading.Thread(target=_rec, daemon=True).start()
+            elif inside(layout.get('play_btn',(0,0,0,0)), x, y):
+                if voice["busy"]: return
+                voice["busy"] = True; voice["status"] = "Playing…"; render()
+                def _play():
+                    try:
+                        subprocess.run(["aplay", voice["wav_path"]], check=True)
+                        voice["status"] = "Played"
+                    except Exception:
+                        voice["status"] = "Play error"
+                    finally:
+                        voice["busy"] = False; render()
+                threading.Thread(target=_play, daemon=True).start()
+        return on_press, on_release
 
     def close_window(event=None):
         root.attributes('-fullscreen', False)
@@ -515,4 +619,6 @@ def run_touch_ui(fullscreen: bool = True):
 
 
 if __name__ == "__main__":
+    #handle_recognized_text("go to weather")
+    #handle_recognized_text("set an alarm at 7:30 am")
     raise SystemExit(main())
