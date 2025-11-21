@@ -2,13 +2,14 @@
 import time
 import signal
 import subprocess
+import re
 import requests
 import json
 from datetime import datetime
 from typing import Optional
 import pvporcupine
 from pvrecorder import PvRecorder
-
+from . import BACKEND_URL
 # Optional tiny popup UI for feedback
 try:
     import tkinter as tk  # type: ignore
@@ -18,7 +19,7 @@ except Exception:
 # ====== CONFIG ======
 ACCESS_KEY   = os.getenv("PICOVOICE_ACCESS_KEY")  # Set your Picovoice AccessKey via env var
 PC_SERVER    = os.getenv("PC_SERVER", "http://10.0.0.111:5000")  # <-- change to your PC's Flask URL
-TRANSCRIBE_EP = f"{PC_SERVER}/transcribe_nlu"
+TRANSCRIBE_EP = f"{PC_SERVER}/transcribe"
 ARECORD_CARD = os.getenv("ARECORD_CARD", "plughw:1,0")  # Use plughw for resampling; override via env
 DEVICE_INDEX = int(os.getenv("PVREC_DEVICE_INDEX", "0"))  # pvrecorder input device index
 # Built-in wake-words to use when no custom KEYWORD paths are available
@@ -40,6 +41,10 @@ VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", "/tmp/cc_voice_cmd.json")
 OFFLINE_ONLY = os.getenv("VOICE_OFFLINE", "0") == "1"
 PLAYBACK_AFTER_RECORD = os.getenv("VOICE_PLAYBACK", "0") == "1"
 # =====================
+
+_WORDS = r"(clock|weather|calendar|alarm|voice)"
+_RE_GOTO = re.compile(rf"\b(?:go to|show|open)\s+{_WORDS}\b", re.I)
+_RE_SET_ALARM = re.compile(r"\bset(?: an)? alarm (?:for|at)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", re.I)
 
 STOP = False
 
@@ -110,6 +115,8 @@ class _Popup:
                 self.root.update()
         except Exception:
             pass
+
+
 
 def handle_signal(sig, frame):
     # Graceful shutdown on Ctrl+C / SIGTERM
@@ -205,6 +212,34 @@ def _emit_ui_command(view: str, heard_text: str = ""):
             json.dump(payload, f, ensure_ascii=False)
     except Exception:
         pass
+
+def _to_24h(h, m, ap):
+    if ap:
+        ap = ap.lower()
+        if ap == "pm" and h < 12: h += 12
+        if ap == "am" and h == 12: h = 0
+    return f"{h:02d}:{(m or 0):02d}"
+
+def _local_regex_nlu(text: str):
+    if not text: return {"intent":"none"}
+    m = _RE_GOTO.search(text)
+    if m: return {"intent":"goto","view":m.group(1).lower()}
+    m = _RE_SET_ALARM.search(text)
+    if m:
+        h = int(m.group(1)); mm = int(m.group(2) or 0); ap = m.group(3)
+        return {"intent":"set_alarm","alarm_time":_to_24h(h, mm, ap)}
+    return {"intent":"none"}
+
+def get_intent(text: str):
+    """Try server NLU first, then local regex fallback."""
+    try:
+        r = requests.post(f"{BACKEND_URL}/nlu", json={"text": text}, timeout=5)
+        if r.ok:
+            data = r.json()
+            return data.get("nlu") or {"intent":"none"}
+    except Exception:
+        pass
+    return _local_regex_nlu(text)
 
 def main():
     if not ACCESS_KEY:
