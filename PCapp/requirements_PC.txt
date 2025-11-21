@@ -1,12 +1,13 @@
-flask
-faster-whisper
-ffmpeg-python
-google-generativeai
-#tts engines
-coqui-tts==0.25.3
+coqui-tts==0.27.2
 soundfile==0.13.1
-edge-tts>=6.1.12
-
-#Coqui runtime constraint
-numpy<2.1,>=1.26
-spacy<3.8
+numpy==1.26.4
+scipy==1.13.1
+tokenizers==0.21.4
+soxr==0.3.7
+transformers==4.55.4
+torch==2.8.0
+torchaudio==2.8.0
+Flask==3.1.2
+faster-whisper==1.2.1
+ctranslate2==4.5.0
+onnxruntime==1.19.2
