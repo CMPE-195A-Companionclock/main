@@ -86,6 +86,7 @@ FFmpeg: required on the machine running the Flask server
 Windows: install from ffmpeg.org and add bin to PATH
 macOS: brew install ffmpeg
 Linux: sudo apt-get install ffmpeg
+install eSpeak-NG and set PHONEMIZER_ESPEAK_LIBRARY (Windows path) so Coqui can phonemize.
 
 2) Python packages
 pip install -r PCapp/requirements_PC.txt
@@ -109,3 +110,18 @@ curl -o out.wav "http://<HOST>:5000/tts?text=Hello+from+Edge&engine=edge&voice=e
 6) Raspberry Pi playback
 aplay out.wav
 ________________________________________________________________________
+
+### NLU (text)
+- **GET** `/nlu?text=...`
+- **POST** `/nlu` with JSON `{"text":"..."}`
+
+Response:
+```json
+{
+  "text": "set an alarm at 7:30 am",
+  "engine": "gemini",               // or "regex" when Gemini not configured
+  "nlu": {
+    "intent": "set_alarm",
+    "alarm_time": "07:30"
+  }
+}
