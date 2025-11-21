@@ -8,5 +8,5 @@ pillow
 # or a prebuilt wheel to avoid compiling numpy.
 
 # Wake word (optional; required for PIapp/voiceRecognition.py)
-pvporcupine
+pvporcupine 
 pvrecorder
