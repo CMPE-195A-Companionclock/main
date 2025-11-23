@@ -9,6 +9,7 @@ import requests
 from dotenv import load_dotenv
 
 from PIapp.voiceRecognition import get_intent
+from PIapp.nlu import get_intent
 from app_router import goto_view, schedule_alarm
 
 BASE_DIR = Path(__file__).resolve().parent / "PIapp"
