@@ -2,11 +2,11 @@
 import time
 import signal
 import subprocess
-import re
 import requests
 import json
 from datetime import datetime
 from typing import Optional
+
 import pvporcupine
 from pvrecorder import PvRecorder
 from . import BACKEND_URL
@@ -31,13 +31,13 @@ ARECORD_CARD = os.getenv("ARECORD_CARD", os.getenv("VOICE_ARECORD_DEVICE", "plug
 DEVICE_INDEX = int(os.getenv("PVREC_DEVICE_INDEX", "0"))  # pvrecorder input device index
 # Built-in wake-words to use when no custom KEYWORD paths are available
 KEYWORDS     = ["jarvis"]
-# Optional custom Porcupine keyword model paths (.ppn).
-# Try both home directory and the repo-local PIapp/keyword path by default.
+
 _LOCAL_KWD = os.path.join(os.path.dirname(__file__), "keyword", "Companion-Clock_en_raspberry-pi_v3_0_0.ppn")
 KEYWORD      = [
     os.path.expanduser("~/keyword/Companion-Clock_en_raspberry-pi_v3_0_0.ppn"),
     _LOCAL_KWD,
 ]
+
 SENSITIVITY  = float(os.getenv("PORCUPINE_SENSITIVITY", "0.65"))  # 0.1..0.9 (higher = more sensitive)
 RECORD_SEC   = int(os.getenv("VOICE_SEC", "10"))  # seconds to record after wake word
 COOLDOWN_SEC = 1.5             # ignore new triggers for this long after each detection
@@ -47,11 +47,6 @@ VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", "/tmp/cc_voice_cmd.json")
 # Offline mode (no Flask). If set to "1", skip sending to server and optionally play back.
 OFFLINE_ONLY = os.getenv("VOICE_OFFLINE", "0") == "1"
 PLAYBACK_AFTER_RECORD = os.getenv("VOICE_PLAYBACK", "0") == "1"
-# =====================
-
-_WORDS = r"(clock|weather|calendar|alarm|voice)"
-_RE_GOTO = re.compile(rf"\b(?:go to|show|open)\s+{_WORDS}\b", re.I)
-_RE_SET_ALARM = re.compile(r"\bset(?: an)? alarm (?:for|at)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", re.I)
 
 STOP = False
 
@@ -123,8 +118,6 @@ class _Popup:
         except Exception:
             pass
 
-
-
 def handle_signal(sig, frame):
     # Graceful shutdown on Ctrl+C / SIGTERM
     global STOP
@@ -144,10 +137,6 @@ def record_wav(path: str):
     ], check=True)
 
 def send_to_server(path: str) -> str:
-    """Offline stub: skip HTTP and just report the saved file path.
-
-    Returns empty text to indicate no transcription performed.
-    """
     if OFFLINE_ONLY:
         try:
             size = os.path.getsize(path)
@@ -163,8 +152,6 @@ def send_to_server(path: str) -> str:
         text = (data.get("text") or "").strip()
         nlu  = data.get("nlu") or {"intent": "none"}
 
-        # Write a command file for the Tk UI to pick up
-        # (UI poller will delete the file after consuming)
         payload = {"nlu": nlu}
         intent = (nlu.get("intent") or "").lower()
         if intent == "goto" and nlu.get("view"):
@@ -172,7 +159,6 @@ def send_to_server(path: str) -> str:
         elif intent == "set_alarm" and nlu.get("alarm_time"):
             payload.update({"cmd": "set_alarm", "time": nlu["alarm_time"]})
 
-        # Write the command file for the UI to read
         try:
             with open(VOICE_CMD_PATH, "w", encoding="utf-8") as g:
                 json.dump(payload, g, ensure_ascii=False)
@@ -188,28 +174,6 @@ def send_to_server(path: str) -> str:
     except Exception as e:
         print(f"[voice] Unexpected error posting audio: {e}")
         return ""
-
-# def _map_text_to_view(text: str) -> Optional[str]:
-#     """Very simple keyword mapping from ASR text to a target view.
-
-#     Returns one of: 'clock', 'weather', 'calendar', 'alarm', 'voice' or None.
-#     """
-#     t = text.strip().lower()
-#     if not t:
-#         return None
-#     # Japanese/English keywords
-#     pairs = [
-#         ("clock", ("clock", "ã‚¯ãƒ­ãƒƒã‚¯", "æ™‚è¨ˆ")),
-#         ("weather", ("weather", "å¤©æ°—", "ã¦ã‚“ã")),
-#         ("calendar", ("calendar", "ã‚«ãƒ¬ãƒ³ãƒ€ãƒ¼", "äºˆå®š")),
-#         ("alarm", ("alarm", "ã‚¢ãƒ©ãƒ¼ãƒ ")),
-#         ("voice", ("voice", "ãƒœã‚¤ã‚¹", "éŒ²éŸ³")),
-#     ]
-#     for view, keys in pairs:
-#         for k in keys:
-#             if k in t:
-#                 return view
-#     return None
 
 
 def _emit_ui_command(view: str, heard_text: str = ""):
