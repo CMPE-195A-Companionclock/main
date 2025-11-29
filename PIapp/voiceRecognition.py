@@ -141,11 +141,24 @@ def send_to_server(path: str) -> str:
     if not SERVER_URL:
         raise RuntimeError("SERVER_URL is empty. Set VOICE_SERVER_URL or edit voiceRecognition.py.")
 
-    with open(path, "rb") as fh:
-        files = {"audio": ("input.wav", fh, "audio/wav")}
-        print(f"Sending {path} to {SERVER_URL} ...")
-        resp = requests.post(SERVER_URL, files=files, timeout=60)
-    resp.raise_for_status()
+    try:
+        with open(path, "rb") as fh:
+            files = {"audio": ("input.wav", fh, "audio/wav")}
+            print(f"Sending {path} to {SERVER_URL} ...")
+            resp = requests.post(SERVER_URL, files=files, timeout=60)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        body = ""
+        if getattr(e, "response", None) is not None:
+            try:
+                body = e.response.text.strip()
+            except Exception:
+                body = ""
+        msg = f"Failed to reach {SERVER_URL}: {e}"
+        if body:
+            msg += f" | body: {body[:200]}"
+        print(msg)
+        raise
 
     text = ""
     try:
@@ -377,7 +390,7 @@ def main():
                 except requests.RequestException as e:
                     print(f"HTTP error: {e}")
                     if popup:
-                        popup.update("Network error")
+                        popup.update(f"Network error: {e}")
                         time.sleep(0.8)
                 finally:
                     # Resume wake-word listening

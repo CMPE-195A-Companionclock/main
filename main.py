@@ -425,6 +425,7 @@ def run_touch_ui(fullscreen: bool = True):
                                         url = os.getenv("VOICE_SERVER_URL", os.getenv("SERVER_URL", "http://192.168.0.10:5000/transcribe"))
                                         with open(voice["wav_path"], "rb") as fh:
                                             r = requests.post(url, files={"audio": ("in.wav", fh, "audio/wav")}, timeout=30)
+                                        r.raise_for_status()
                                         txt = ""
                                         try:
                                             j = r.json()
@@ -460,9 +461,11 @@ def run_touch_ui(fullscreen: bool = True):
                                                 mode["view"] = target
                                             render()
                                         root.after(0, _apply_result)
-                                    except Exception:
+                                    except Exception as e:
+                                        err_msg = f"ASR error: {e}"
+                                        print(err_msg)
                                         def _apply_err():
-                                            voice["status"] = "ASR error"
+                                            voice["status"] = err_msg[:60]
                                             render()
                                         root.after(0, _apply_err)
                             except Exception:
