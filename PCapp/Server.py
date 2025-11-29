@@ -24,9 +24,16 @@ def _resolve_upload_dir():
     custom = os.environ.get("VOICE_INBOX_DIR", "").strip()
     if custom:
         return custom
-    # Default to user's Downloads folder if available; otherwise temp dir.
+    # Prefer user-specified Downloads path if it exists (e.g., D:\panda\Download); fallback to ~/Downloads or temp.
+    preferred = os.environ.get("VOICE_DOWNLOADS_PATH", "D:\\panda\\Download").strip()
+    if preferred:
+        base = os.path.expandvars(preferred)
+        if os.path.isdir(base) or os.access(os.path.dirname(base), os.W_OK):
+            return base
     downloads = os.path.join(os.path.expanduser("~"), "Downloads")
-    return downloads if os.path.isdir(downloads) or os.access(os.path.dirname(downloads), os.W_OK) else os.path.join(tempfile.gettempdir(), "cc_uploads")
+    if os.path.isdir(downloads) or os.access(os.path.dirname(downloads), os.W_OK):
+        return downloads
+    return os.path.join(tempfile.gettempdir(), "cc_uploads")
 
 UPLOAD_DIR = _resolve_upload_dir()
 os.makedirs(UPLOAD_DIR, exist_ok=True)
