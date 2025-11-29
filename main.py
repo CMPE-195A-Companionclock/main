@@ -2,6 +2,7 @@ import argparse
 import os
 import time
 from typing import Optional
+import json
 import requests
 
 
@@ -427,7 +428,13 @@ def run_touch_ui(fullscreen: bool = True):
                                         txt = ""
                                         try:
                                             j = r.json()
-                                            txt = (j.get("text") or "").strip()
+                                            if isinstance(j, dict):
+                                                txt = (j.get("text") or j.get("path") or j.get("status") or "")
+                                                txt = (txt or "").strip()
+                                                if not txt:
+                                                    txt = json.dumps(j)[:80]
+                                            else:
+                                                txt = str(j)[:80]
                                         except Exception:
                                             txt = r.text[:80]
                                         # Map recognized text to a target view

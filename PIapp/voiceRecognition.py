@@ -17,7 +17,7 @@ except Exception:
 
 # ====== CONFIG ======
 ACCESS_KEY   = os.getenv("PICOVOICE_ACCESS_KEY")  # Set your Picovoice AccessKey via env var
-SERVER_URL   = "http://192.168.0.10:5000/transcribe"  # <-- change to your PC's Flask URL
+SERVER_URL   = os.getenv("VOICE_SERVER_URL", "http://192.168.0.10:5000/transcribe")  # Flask STT/upload endpoint
 ARECORD_CARD = os.getenv("ARECORD_CARD", "plughw:1,0")  # Use plughw for resampling; override via env
 DEVICE_INDEX = int(os.getenv("PVREC_DEVICE_INDEX", "0"))  # pvrecorder input device index
 # Built-in wake-words to use when no custom KEYWORD paths are available
@@ -129,16 +129,37 @@ def record_wav(path: str):
     ], check=True)
 
 def send_to_server(path: str) -> str:
-    """Offline stub: skip HTTP and just report the saved file path.
+    """POST the recorded WAV to the Flask STT server and return the recognized text."""
+    if OFFLINE_ONLY:
+        try:
+            size = os.path.getsize(path)
+        except Exception:
+            size = -1
+        print(f"Offline mode: recorded file saved at {path} (size={size} bytes). Skipping server.")
+        return ""
 
-    Returns empty text to indicate no transcription performed.
-    """
+    if not SERVER_URL:
+        raise RuntimeError("SERVER_URL is empty. Set VOICE_SERVER_URL or edit voiceRecognition.py.")
+
+    with open(path, "rb") as fh:
+        files = {"audio": ("input.wav", fh, "audio/wav")}
+        print(f"Sending {path} to {SERVER_URL} ...")
+        resp = requests.post(SERVER_URL, files=files, timeout=60)
+    resp.raise_for_status()
+
+    text = ""
     try:
-        size = os.path.getsize(path)
-    except Exception:
-        size = -1
-    print(f"Offline mode: recorded file saved at {path} (size={size} bytes). Skipping server.")
-    return ""
+        data = resp.json()
+        if isinstance(data, dict):
+            text = data.get("text") or data.get("path") or data.get("status") or ""
+            if not text:
+                text = json.dumps(data)
+        else:
+            text = str(data)
+    except ValueError:
+        text = resp.text.strip()
+    print(f"Server response text: {text}")
+    return text
 
 
 def _map_text_to_view(text: str) -> Optional[str]:

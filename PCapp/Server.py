@@ -1,4 +1,4 @@
-import os, tempfile, subprocess, json
+import os, tempfile, subprocess, json, time, uuid
 from flask import Flask, request, jsonify
 from faster_whisper import WhisperModel
 
@@ -20,6 +20,8 @@ COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"  # GPU uses float16 (fa
 model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
 
 app = Flask(__name__)
+UPLOAD_DIR = os.environ.get("VOICE_INBOX_DIR", "").strip() or os.path.join(tempfile.gettempdir(), "cc_uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Configure Gemini (optional)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -131,6 +133,20 @@ def transcribe_nlu():
             if conv_path != tmp_path: os.remove(conv_path)
         except Exception:
             pass
+
+@app.route("/upload", methods=["POST"])
+def upload_audio():
+    """Simple endpoint that just saves incoming audio and returns the file path."""
+    if "audio" not in request.files:
+        return jsonify({"error":"audio file missing (multipart/form-data, field name 'audio')"}), 400
+
+    f = request.files["audio"]
+    ext = os.path.splitext(f.filename or "audio.wav")[1] or ".wav"
+    safe_ext = ext if len(ext) <= 8 else ext[:8]
+    fname = f"upload_{int(time.time())}_{uuid.uuid4().hex[:8]}{safe_ext}"
+    out_path = os.path.join(UPLOAD_DIR, fname)
+    f.save(out_path)
+    return jsonify({"status": "saved", "path": out_path})
 
 if __name__ == "__main__":
     # Bind to 0.0.0.0 so /transcribe is reachable from your LAN
