@@ -20,7 +20,15 @@ COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"  # GPU uses float16 (fa
 model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
 
 app = Flask(__name__)
-UPLOAD_DIR = os.environ.get("VOICE_INBOX_DIR", "").strip() or os.path.join(tempfile.gettempdir(), "cc_uploads")
+def _resolve_upload_dir():
+    custom = os.environ.get("VOICE_INBOX_DIR", "").strip()
+    if custom:
+        return custom
+    # Default to user's Downloads folder if available; otherwise temp dir.
+    downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+    return downloads if os.path.isdir(downloads) or os.access(os.path.dirname(downloads), os.W_OK) else os.path.join(tempfile.gettempdir(), "cc_uploads")
+
+UPLOAD_DIR = _resolve_upload_dir()
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Configure Gemini (optional)
