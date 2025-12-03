@@ -88,13 +88,13 @@ def transcribe():
         })
     except Exception as e:
         return jsonify({"error": f"transcription failed: {type(e).__name__}: {e}"}), 400
-    finally:
-        for p in (in_path, locals().get("conv_path")):
-            try:
-                if p and os.path.exists(p):
-                    os.remove(p)
-            except Exception:
-                pass
+    # finally:
+    #     for p in (in_path, locals().get("conv_path")):
+    #         try:
+    #             if p and os.path.exists(p):
+    #                 os.remove(p)
+    #         except Exception:
+    #             pass
 
 @app.get("/tts")
 def tts():
@@ -151,10 +151,10 @@ def tts():
         return resp
     except Exception as e:
         return jsonify({"error": f"edge-tts synth failed: {e}"}), 500
-    finally:
-        for p in (mp3_path, wav_path):
-            try: os.remove(p)
-            except: pass
+    # finally:
+    #     for p in (mp3_path, wav_path):
+    #         try: os.remove(p)
+    #         except: pass
 
 def _warmup_coqui():
     try:
