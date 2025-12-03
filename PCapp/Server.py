@@ -5,6 +5,7 @@ from faster_whisper import WhisperModel
 from typing import Optional
 from PIapp.voiceRecognition import get_intent  # reuses NLU mapping
 import threading
+from dotenv import load_dotenv; load_dotenv()
 
 # Config 
 TTS_ENGINE_DEFAULT = os.environ.get("TTS_ENGINE", "coqui").strip().lower()
