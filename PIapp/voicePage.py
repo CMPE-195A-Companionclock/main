@@ -54,7 +54,8 @@ def _draw_button(drw: ImageDraw.ImageDraw, rect, label: str, font):
 
 
 def draw_voice_page(status_text: Optional[str] = None) -> ImageTk.PhotoImage:
-    img = Image.new("RGBA", (WINDOW_W, WINDOW_H), (255, 255, 255, 0))
+    # Solid white to match the main clock page background
+    img = Image.new("RGB", (WINDOW_W, WINDOW_H), "white")
     drw = ImageDraw.Draw(img)
 
     title_f = _font(40)
