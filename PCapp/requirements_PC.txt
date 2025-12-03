@@ -14,3 +14,6 @@ onnxruntime==1.19.2
 phonemizer
 python-dotenv
 edge-tts
+requests==2.31.0
+pvporcupine
+pvrecorder
