@@ -3,7 +3,7 @@ import os, tempfile, subprocess, json, asyncio, shutil
 from flask import Flask, request, jsonify, send_file
 from faster_whisper import WhisperModel
 from typing import Optional
-from PIapp.voiceRecognition import get_intent  # reuses NLU mapping
+from PIapp.nlu import get_intent  # lightweight NLU, avoids pvporcupine dependency
 import threading
 from dotenv import load_dotenv; load_dotenv()
 
