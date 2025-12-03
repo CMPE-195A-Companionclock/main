@@ -303,6 +303,11 @@ def main():
     # Try PvRecorder first. If it fails due to GLIBC or other runtime issues, fall back to arecord-based streaming.
     use_arecord_stream = False
     sel_index = DEVICE_INDEX
+    def _restart_recorder():
+        rec = PvRecorder(device_index=sel_index, frame_length=porcupine.frame_length)
+        rec.start()
+        return rec
+
     try:
         # Allow selecting device by substring name via PVREC_DEVICE_NAME
         want_name = os.getenv("PVREC_DEVICE_NAME", "").strip().lower()
@@ -312,8 +317,7 @@ def main():
                     sel_index = i
                     print(f"Selected device by name match '{want_name}': index {sel_index} ({name})")
                     break
-        recorder = PvRecorder(device_index=sel_index, frame_length=porcupine.frame_length)
-        recorder.start()
+        recorder = _restart_recorder()
         try:
             dev_name = PvRecorder.get_available_devices()[sel_index]
         except Exception:
@@ -383,7 +387,16 @@ def main():
                         pass
                     arec_proc = None
                 else:
-                    recorder.stop()
+                    # Fully release the device before spawning arecord
+                    try:
+                        recorder.stop()
+                    except Exception:
+                        pass
+                    try:
+                        recorder.delete()
+                    except Exception:
+                        pass
+                    recorder = None
 
                 # (Optional) give a short beep/feedback here if you want:
                 # subprocess.run(["aplay", "-q", "/usr/share/sounds/alsa/Front_Center.wav"], check=False)
@@ -440,7 +453,11 @@ def main():
                         if use_arecord_stream:
                             arec_proc = _start_arecord_stream()
                         else:
-                            recorder.start()
+                            try:
+                                recorder = _restart_recorder()
+                            except Exception as e:
+                                print(f"Could not restart recorder: {e}")
+                                STOP = True
                     if popup:
                         popup.hide()
             # tiny sleep to avoid busy-looping; pvrecorder already blocks, so keep it minimal
@@ -452,11 +469,16 @@ def main():
                 if arec_proc:
                     arec_proc.terminate()
             else:
-                recorder.stop()
+                if recorder:
+                    recorder.stop()
         except Exception:
             pass
         if not use_arecord_stream:
-            recorder.delete()
+            try:
+                if recorder:
+                    recorder.delete()
+            except Exception:
+                pass
         porcupine.delete()
         try:
             if popup:
