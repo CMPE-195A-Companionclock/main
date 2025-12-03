@@ -2,6 +2,7 @@ import argparse
 import os
 import time
 from typing import Optional
+import json
 import requests
 
 
@@ -424,10 +425,17 @@ def run_touch_ui(fullscreen: bool = True):
                                         url = os.getenv("VOICE_SERVER_URL", os.getenv("SERVER_URL", "http://192.168.0.10:5000/transcribe"))
                                         with open(voice["wav_path"], "rb") as fh:
                                             r = requests.post(url, files={"audio": ("in.wav", fh, "audio/wav")}, timeout=30)
+                                        r.raise_for_status()
                                         txt = ""
                                         try:
                                             j = r.json()
-                                            txt = (j.get("text") or "").strip()
+                                            if isinstance(j, dict):
+                                                txt = (j.get("text") or j.get("path") or j.get("status") or "")
+                                                txt = (txt or "").strip()
+                                                if not txt:
+                                                    txt = json.dumps(j)[:80]
+                                            else:
+                                                txt = str(j)[:80]
                                         except Exception:
                                             txt = r.text[:80]
                                         # Map recognized text to a target view
@@ -453,9 +461,11 @@ def run_touch_ui(fullscreen: bool = True):
                                                 mode["view"] = target
                                             render()
                                         root.after(0, _apply_result)
-                                    except Exception:
+                                    except Exception as e:
+                                        err_msg = f"ASR error: {e}"
+                                        print(err_msg)
                                         def _apply_err():
-                                            voice["status"] = "ASR error"
+                                            voice["status"] = err_msg[:60]
                                             render()
                                         root.after(0, _apply_err)
                             except Exception:
