@@ -9,12 +9,6 @@ from typing import Optional
 import pvporcupine
 from pvrecorder import PvRecorder
 
-# Optional tiny popup UI for feedback
-try:
-    import tkinter as tk  # type: ignore
-except Exception:
-    tk = None  # type: ignore
-
 # ====== CONFIG ======
 ACCESS_KEY   = os.getenv("PICOVOICE_ACCESS_KEY")  # Set your Picovoice AccessKey via env var
 SERVER_URL   = os.getenv("VOICE_SERVER_URL", "http://192.168.0.10:5000/transcribe")  # Flask STT/upload endpoint
@@ -43,72 +37,11 @@ PLAYBACK_AFTER_RECORD = os.getenv("VOICE_PLAYBACK", "0") == "1"
 STOP = False
 
 
-class _Popup:
-    def __init__(self):
-        self.root = None
-        self.top = None
-        self.label = None
-        try:
-            if tk is None:
-                return
-            # Only initialize if a display is available
-            self.root = tk.Tk()
-            self.root.withdraw()
-            self.top = tk.Toplevel(self.root)
-            self.top.overrideredirect(True)
-            self.top.attributes('-topmost', True)
-            self.top.configure(bg='black')
-            self.label = tk.Label(self.top, text='', fg='#FFFFFF', bg='black', font=('Arial', 18))
-            self.label.pack(padx=24, pady=16)
-            # Position near top-center (640x120)
-            try:
-                self.top.geometry("640x120+200+100")
-            except Exception:
-                pass
-            self.hide()
-        except Exception:
-            self.root = None
-            self.top = None
-            self.label = None
-
-    def show(self, text: str):
-        if not self.top or not self.label:
-            return
-        self.label.config(text=text)
-        self.top.deiconify()
-        self._pump()
-
-    def update(self, text: str):
-        if not self.top or not self.label:
-            return
-        self.label.config(text=text)
-        self._pump()
-
-    def hide(self):
-        if not self.top:
-            return
-        try:
-            self.top.withdraw()
-            self._pump()
-        except Exception:
-            pass
-
-    def destroy(self):
-        try:
-            if self.top:
-                self.top.destroy()
-            if self.root:
-                self.root.destroy()
-        except Exception:
-            pass
-
-    def _pump(self):
-        try:
-            if self.root:
-                self.root.update_idletasks()
-                self.root.update()
-        except Exception:
-            pass
+def _status(msg: str):
+    try:
+        print(msg)
+    except Exception:
+        pass
 
 def handle_signal(sig, frame):
     # Graceful shutdown on Ctrl+C / SIGTERM
@@ -300,7 +233,6 @@ def main():
         arec_proc = _start_arecord_stream()
         print(f"Listening for {listen_desc} via arecord stream on {ARECORD_CARD} (16k/mono)...")
 
-    popup = _Popup()
     last_trigger = 0.0
 
     try:
@@ -330,8 +262,7 @@ def main():
                 last_trigger = now
 
                 print("Wake word detected!")
-                if popup:
-                    popup.show("Listening...")
+                _status("Listening...")
                 # Free the device so 'arecord' can open it
                 if use_arecord_stream:
                     try:
@@ -351,8 +282,7 @@ def main():
                 wav_path = f"{SAVE_DIR}/wake_{ts}.wav"
                 try:
                     record_wav(wav_path)
-                    if popup:
-                        popup.update("Recognizing...")
+                    _status("Recognizing...")
                     text = send_to_server(wav_path)
                     try:
                         # Map recognized text to a UI view and emit a command file for the Tk UI
@@ -377,21 +307,18 @@ def main():
                             _emit_ui_command(v, text)
                     except Exception:
                         pass
-                    if popup:
-                        suffix = "..." if len(text) > 60 else ""
-                        popup.update(f"Heard: {text[:60]}{suffix}")
-                        # Briefly show the result
-                        time.sleep(1.2)
+                    suffix = "..." if len(text) > 60 else ""
+                    _status(f"Heard: {text[:60]}{suffix}")
+                    # Briefly show the result
+                    time.sleep(1.2)
                 except subprocess.CalledProcessError as e:
                     print(f"arecord failed: {e}")
-                    if popup:
-                        popup.update("Mic error")
-                        time.sleep(0.8)
+                    _status("Mic error")
+                    time.sleep(0.8)
                 except requests.RequestException as e:
                     print(f"HTTP error: {e}")
-                    if popup:
-                        popup.update(f"Network error: {e}")
-                        time.sleep(0.8)
+                    _status(f"Network error: {e}")
+                    time.sleep(0.8)
                 finally:
                     # Resume wake-word listening
                     if not STOP:
@@ -399,8 +326,6 @@ def main():
                             arec_proc = _start_arecord_stream()
                         else:
                             recorder.start()
-                    if popup:
-                        popup.hide()
             # tiny sleep to avoid busy-looping; pvrecorder already blocks, so keep it minimal
             # time.sleep(0.001)
 
@@ -416,11 +341,6 @@ def main():
         if not use_arecord_stream:
             recorder.delete()
         porcupine.delete()
-        try:
-            if popup:
-                popup.destroy()
-        except Exception:
-            pass
         print("Cleaned up. Bye!")
 
 if __name__ == "__main__":
