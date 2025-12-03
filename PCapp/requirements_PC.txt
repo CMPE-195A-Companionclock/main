@@ -11,3 +11,6 @@ Flask==3.1.2
 faster-whisper==1.2.1
 ctranslate2==4.5.0
 onnxruntime==1.19.2
+phonemizer
+python-dotenv
+edge-tts
