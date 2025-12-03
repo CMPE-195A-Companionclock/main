@@ -10,6 +10,13 @@ from typing import Optional
 import pvporcupine
 from pvrecorder import PvRecorder
 from . import BACKEND_URL
+# Load local .env when running module directly
+try:
+    from pathlib import Path
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except Exception:
+    pass
 # Optional tiny popup UI for feedback
 try:
     import tkinter as tk  # type: ignore
@@ -18,9 +25,9 @@ except Exception:
 
 # ====== CONFIG ======
 ACCESS_KEY   = os.getenv("PICOVOICE_ACCESS_KEY")  # Set your Picovoice AccessKey via env var
-PC_SERVER    = os.getenv("PC_SERVER", "http://10.0.0.111:5000")  # <-- change to your PC's Flask URL
-TRANSCRIBE_EP = f"{PC_SERVER}/transcribe"
-ARECORD_CARD = os.getenv("ARECORD_CARD", "plughw:1,0")  # Use plughw for resampling; override via env
+# Align endpoint/device/seconds with voicePage defaults
+TRANSCRIBE_EP = os.getenv("VOICE_SERVER_URL", os.getenv("SERVER_URL", "http://192.168.0.10:5000/transcribe"))
+ARECORD_CARD = os.getenv("ARECORD_CARD", os.getenv("VOICE_ARECORD_DEVICE", "plughw:1,0"))  # Use plughw for resampling; override via env
 DEVICE_INDEX = int(os.getenv("PVREC_DEVICE_INDEX", "0"))  # pvrecorder input device index
 # Built-in wake-words to use when no custom KEYWORD paths are available
 KEYWORDS     = ["jarvis"]
@@ -32,7 +39,7 @@ KEYWORD      = [
     _LOCAL_KWD,
 ]
 SENSITIVITY  = float(os.getenv("PORCUPINE_SENSITIVITY", "0.65"))  # 0.1..0.9 (higher = more sensitive)
-RECORD_SEC   = 5               # seconds to record after wake word
+RECORD_SEC   = int(os.getenv("VOICE_SEC", "10"))  # seconds to record after wake word
 COOLDOWN_SEC = 1.5             # ignore new triggers for this long after each detection
 SAVE_DIR     = "/tmp"          # where temp wav files are stored
 # Voice command file path for UI IPC

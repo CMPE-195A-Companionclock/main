@@ -96,7 +96,8 @@ def draw_calendar_image(width: int = 1024, height: int = 600, top_margin: int = 
 
     top_margin: extra padding from the very top to avoid overlapping UI chrome.
     """
-    img = Image.new("RGBA", (width, height), (255, 255, 255, 0))
+    # Use solid white to match the main clock page background
+    img = Image.new("RGB", (width, height), "white")
     drw = ImageDraw.Draw(img)
 
     today = datetime.now()
