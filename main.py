@@ -3,6 +3,11 @@ from typing import Optional
 import requests
 from PIapp.voiceRecognition import get_intent
 from app_router import goto_view, schedule_alarm
+from pathlib import Path
+from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parent / "PIapp"
+load_dotenv(BASE_DIR / ".env")
 
 VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", os.path.join(tempfile.gettempdir(), "cc_voice_cmd.json"))
 
