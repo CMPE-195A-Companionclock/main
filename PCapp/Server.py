@@ -64,12 +64,20 @@ def transcribe():
     suffix = os.path.splitext(f.filename or "in.wav")[1] or ".wav"
     in_fd, in_path = tempfile.mkstemp(suffix=suffix); os.close(in_fd)
     f.save(in_path)
+    try:
+        print(f"[transcribe] got upload: {in_path}, size={os.path.getsize(in_path)}")
+    except Exception:
+        pass
 
     try:
         if os.path.getsize(in_path) < 1024:
             return jsonify({"error": "audio file too small/invalid"}), 400
 
         conv_path = to_mono16k(in_path)
+        try:
+            print(f"[transcribe] converted: {conv_path}, size={os.path.getsize(conv_path)}")
+        except Exception:
+            pass
 
         # ASR
         segments, info = model.transcribe(conv_path, vad_filter=True)
