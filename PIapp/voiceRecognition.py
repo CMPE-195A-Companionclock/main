@@ -5,12 +5,11 @@ import subprocess
 import requests
 import json
 from datetime import datetime
-from typing import Optional
-
-
+import audioop
+import wave
+from typing import List
 import pvporcupine
 from pvrecorder import PvRecorder
-from . import BACKEND_URL
 # Load local .env when running module directly
 try:
     from pathlib import Path
@@ -49,7 +48,6 @@ SAVE_DIR     = "/tmp"          # where temp wav files are stored
 VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", "/tmp/cc_voice_cmd.json")
 # Offline mode (no Flask). If set to "1", skip sending to server and optionally play back.
 OFFLINE_ONLY = os.getenv("VOICE_OFFLINE", "0") == "1"
-PLAYBACK_AFTER_RECORD = os.getenv("VOICE_PLAYBACK", "0") == "1"
 
 STOP = False
 
@@ -128,16 +126,78 @@ def handle_signal(sig, frame):
     print("\nStopping...")
 
 def record_wav(path: str):
-    """Record audio with arecord to the given path (16kHz, 2ch, 16-bit)."""
-    subprocess.run([
+    """Record audio with arecord to the given path (16kHz, mono, 16-bit)."""
+
+    chunk_ms = 100                 # analysis window size
+    silence_duration = 1.0         # seconds of silence to stop
+    silence_rms_threshold = 500    # adjust based on mic level
+
+    min_duration = 0.4
+    max_duration = 20.0 
+
+    bytes_per_sample = 2
+    sample_rate = 16000
+    channels = 1
+    samples_per_chunk = int(sample_rate * (chunk_ms / 1000.0))
+    chunk_size = samples_per_chunk * bytes_per_sample
+
+    cmd = [
         "arecord",
         "-D", ARECORD_CARD,
         "-f", "S16_LE",
-        "-r", "16000",
-        "-c", "1",
-        "-d", str(RECORD_SEC),
-        path
-    ], check=True)
+        "-r", str(sample_rate),
+        "-c", str(channels),
+        "-t", "raw",  # raw PCM on stdout
+        "-q",
+    ]
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    audio_chunks: List[bytes] = []
+    silence_start = None
+    t_start = time.time()
+
+    try:
+        while True:
+            chunk = proc.stdout.read(chunk_size)
+            if not chunk:
+                break  # arecord ended unexpectedly
+
+            audio_chunks.append(chunk)
+
+            elapsed = time.time() - t_start
+            if elapsed >= max_duration:
+                # Hard stop to avoid runaway recording
+                break
+            # Compute loudness (RMS)
+            rms = audioop.rms(chunk, bytes_per_sample)
+
+            now = time.time()
+            if rms < silence_rms_threshold:
+                if silence_start is None:
+                    silence_start = now
+                elif (now - silence_start) >= silence_duration and elapsed >= min_duration:
+                    # Enough silence → stop
+                    break
+            else:
+                silence_start = None
+    finally:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=0.5)
+        except Exception:
+            pass
+    if not audio_chunks:
+        print("[voice] No audio captured; writing short silent WAV")
+        audio_chunks = [b"\x00" * chunk_size]
+    # Write collected PCM to a proper WAV file
+    with wave.open(path, "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(bytes_per_sample)
+        wf.setframerate(sample_rate)
+        wf.writeframes(b"".join(audio_chunks))
 
 def send_to_server(path: str) -> str:
     if OFFLINE_ONLY:
@@ -155,12 +215,58 @@ def send_to_server(path: str) -> str:
         text = (data.get("text") or "").strip()
         nlu  = data.get("nlu") or {"intent": "none"}
 
-        payload = {"nlu": nlu}
+        payload = {
+            "nlu": nlu,
+            "text": text,
+        }
         intent = (nlu.get("intent") or "").lower()
         if intent == "goto" and nlu.get("view"):
             payload.update({"cmd": "goto", "view": nlu["view"]})
         elif intent == "set_alarm" and nlu.get("alarm_time"):
             payload.update({"cmd": "set_alarm", "time": nlu["alarm_time"]})
+        elif intent == "plan_commute":
+            missing = nlu.get("missing") or []
+            payload["missing"] = missing
+
+            if missing:
+                # Let the UI handle asking follow-up questions
+                payload["cmd"] = "commute_missing"
+            else:
+                # We have enough to propose an alarm/leave time
+                alarm_prop = nlu.get("alarm_proposal") or {}
+                dest    = nlu.get("destination")
+                arrival = nlu.get("arrival_time")
+                leave   = (
+                    alarm_prop.get("alarm_time")
+                    or nlu.get("latest_leave_time")
+                    or nlu.get("leave_time")
+                )
+
+                if dest:
+                    payload["destination"] = dest
+                if arrival:
+                    payload["arrival_time"] = arrival
+                if leave:
+                    payload["leave_time"] = leave
+
+                if dest or arrival or leave:
+                    payload["cmd"] = "set_commute"
+
+        elif intent == "set_commute":
+            dest = nlu.get("destination")
+            arrival = nlu.get("arrival_time")
+            leave = (
+                nlu.get("latest_leave_time")
+                or nlu.get("leave_time")
+            )
+            if dest:
+                payload["destination"] = dest
+            if arrival:
+                payload["arrival_time"] = arrival
+            if leave:
+                payload["leave_time"] = leave
+            if dest or arrival or leave:
+                payload["cmd"] = "set_commute"
 
         try:
             with open(VOICE_CMD_PATH, "w", encoding="utf-8") as g:
@@ -168,6 +274,11 @@ def send_to_server(path: str) -> str:
             print("[voice] wrote UI payload:", payload)
         except Exception as e:
             print("[voice] could not write VOICE_CMD_PATH:", e)
+
+        try:
+            os.remove(path)
+        except Exception:
+            pass
 
         return text
 
@@ -177,43 +288,6 @@ def send_to_server(path: str) -> str:
     except Exception as e:
         print(f"[voice] Unexpected error posting audio: {e}")
         return ""
-
-
-def _emit_ui_command(view: str, heard_text: str = ""):
-    try:
-        payload = {"cmd": "goto", "view": view, "text": heard_text}
-        with open(VOICE_CMD_PATH, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False)
-    except Exception:
-        pass
-
-def _to_24h(h, m, ap):
-    if ap:
-        ap = ap.lower()
-        if ap == "pm" and h < 12: h += 12
-        if ap == "am" and h == 12: h = 0
-    return f"{h:02d}:{(m or 0):02d}"
-
-def _local_regex_nlu(text: str):
-    if not text: return {"intent":"none"}
-    m = _RE_GOTO.search(text)
-    if m: return {"intent":"goto","view":m.group(1).lower()}
-    m = _RE_SET_ALARM.search(text)
-    if m:
-        h = int(m.group(1)); mm = int(m.group(2) or 0); ap = m.group(3)
-        return {"intent":"set_alarm","alarm_time":_to_24h(h, mm, ap)}
-    return {"intent":"none"}
-
-def get_intent(text: str):
-    """Try server NLU first, then local regex fallback."""
-    try:
-        r = requests.post(f"{BACKEND_URL}/nlu", json={"text": text}, timeout=5)
-        if r.ok:
-            data = r.json()
-            return data.get("nlu") or {"intent":"none"}
-    except Exception:
-        pass
-    return _local_regex_nlu(text)
 
 def main():
     global STOP
@@ -383,29 +457,6 @@ def main():
                     if popup:
                         popup.update("Recognizing...")
                     text = send_to_server(wav_path)
-                    try:
-                        # Map recognized text to a UI view and emit a command file for the Tk UI
-                        def _map_simple(txt: str):
-                            t = (txt or "").strip().lower()
-                            if not t:
-                                return None
-                            pairs = [
-                                ("clock", ("clock", "\u6642\u8a08", "\u30af\u30ed\u30c3\u30af")),
-                                ("weather", ("weather", "\u5929\u6c17")),
-                                ("calendar", ("calendar", "\u30ab\u30ec\u30f3\u30c0\u30fc")),
-                                ("alarm", ("alarm", "\u30a2\u30e9\u30fc\u30e0")),
-                                ("voice", ("voice", "\u30dc\u30a4\u30b9", "\u9332\u97f3")),
-                            ]
-                            for v, keys in pairs:
-                                for k in keys:
-                                    if k in t:
-                                        return v
-                            return None
-                        v = _map_simple(text)
-                        if v:
-                            _emit_ui_command(v, text)
-                    except Exception:
-                        pass
                     if popup:
                         suffix = "..." if len(text) > 60 else ""
                         popup.update(f"Heard: {text[:60]}{suffix}")
