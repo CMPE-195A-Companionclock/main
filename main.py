@@ -5,10 +5,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
-import requests
 from dotenv import load_dotenv
 
-from PIapp.voiceRecognition import get_intent
 from PIapp.nlu import get_intent
 from app_router import goto_view, schedule_alarm
 
@@ -38,7 +36,7 @@ def show_calendar():
     from PIapp.calendarPage import main as cal_main
     cal_main()
 
-
+#legacy debug
 def route_intent(intent: dict):
     it = (intent or {}).get("intent")
     if it == "goto":
@@ -52,7 +50,7 @@ def route_intent(intent: dict):
             except Exception as e:
                 print("Failed to schedule alarm:", e)
 
-
+#legacy helper
 def handle_recognized_text(text: str):
     intent = get_intent(text)
     print("NLU:", intent)
@@ -286,6 +284,46 @@ def run_touch_ui(fullscreen: bool = True):
                             goto = payload.get("goto")
                             if goto in {"clock", "weather", "calendar", "alarm"}:
                                 mode["view"] = goto
+
+                        elif cmd == "set_commute":
+                            hhmm = str(
+                                payload.get("leave_time")
+                                or payload.get("arrival_time")
+                                or ""
+                            ).strip()
+                            if hhmm:
+                                try:
+                                    h, m = [int(x) for x in hhmm.split(":", 1)]
+                                    key = (h, m)
+                                    if not any(
+                                        (a.get("hour"), a.get("minute")) == key
+                                        for a in alarms["items"]
+                                    ):
+                                        alarms["items"].append({
+                                            "hour": h,
+                                            "minute": m,
+                                            "enabled": True,
+                                            "destination": payload.get("destination"),
+                                        })
+                                        alarms["i"] = len(alarms["items"]) - 1
+                                    mode["view"] = "alarm"
+                                except Exception:
+                                    pass
+                        elif cmd == "commute_missing":
+                            missing = payload.get("missing") or []
+                            
+                            if speak:
+                                if "arrival_time" in missing and "destination" in missing:
+                                    speak("I can help with your commute, but I need both your arrival time and your destination. For example, say: I need to be at the airport by 7 a.m.")
+                                elif "destination" in missing:
+                                    speak("Okay. Where are you going?")
+                                elif "arrival_time" in missing:
+                                    speak("What time do you need to arrive?")
+                                elif "prep_minutes" in missing:
+                                    speak("How many minutes do you need to get ready before leaving?")
+                                else:
+                                    speak("I need a little more information to plan your commute. Please say when and where you need to be.")
+
 
                     try:
                         os.remove(VOICE_CMD_PATH)
