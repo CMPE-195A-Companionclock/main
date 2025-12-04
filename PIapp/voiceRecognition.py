@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
+
 import pvporcupine
 from pvrecorder import PvRecorder
 from . import BACKEND_URL
@@ -32,11 +33,13 @@ DEVICE_INDEX = int(os.getenv("PVREC_DEVICE_INDEX", "0"))  # pvrecorder input dev
 # Built-in wake-words to use when no custom KEYWORD paths are available
 KEYWORDS     = ["jarvis"]
 
+
 _LOCAL_KWD = os.path.join(os.path.dirname(__file__), "keyword", "Companion-Clock_en_raspberry-pi_v3_0_0.ppn")
 KEYWORD      = [
     os.path.expanduser("~/keyword/Companion-Clock_en_raspberry-pi_v3_0_0.ppn"),
     _LOCAL_KWD,
 ]
+
 
 SENSITIVITY  = float(os.getenv("PORCUPINE_SENSITIVITY", "0.65"))  # 0.1..0.9 (higher = more sensitive)
 RECORD_SEC   = int(os.getenv("VOICE_SEC", "10"))  # seconds to record after wake word
