@@ -4,6 +4,12 @@ from typing import Optional
 import threading
 
 import requests
+import os, tempfile, subprocess, json, asyncio, shutil, re, time, math
+import datetime as dt
+from typing import Optional
+import threading
+
+import requests
 from flask import Flask, request, jsonify, send_file
 from faster_whisper import WhisperModel
 from typing import Optional
@@ -42,6 +48,152 @@ COMPUTE_TYPE = "float16" if DEVICE == "cuda" else "int8"
 
 model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
 app = Flask(__name__)
+
+_gemini_model = None
+def _get_gemini():
+    global _gemini_model
+    if not GEMINI_API_KEY:
+        return None
+    if _gemini_model is None:
+        import google.generativeai as genai
+        genai.configure(api_key=GEMINI_API_KEY)
+        _gemini_model = genai.GenerativeModel(GEMINI_MODEL)
+    return _gemini_model
+
+_GEMINI_PLAN_PROMPT = """You extract commute planning parameters.
+Return STRICT JSON only, fields:
+- "intent": "plan_commute" if user is asking to plan morning or set a wake time for a trip; else "none".
+- If planning: include "arrival_time" as "HH:MM" 24h, "destination" as a string address/place name,
+  and optional "prep_minutes" as integer if user mentioned prep time; else omit.
+
+Only output JSON. User said: {text}
+"""
+
+def gemini_nlu(text: str) -> Optional[dict]:
+    if not text or not GEMINI_API_KEY:
+        return None
+    try:
+        m = _get_gemini()
+        if m is None:
+            return None
+        resp = m.generate_content(_GEMINI_PLAN_PROMPT.format(text=text))
+        raw = (resp.text or "").strip()
+        j = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+        if not j:
+            return None
+        data = json.loads(j.group(0))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return None
+
+def _unix_epoch(dts: dt.datetime) -> int:
+    return int(dts.timestamp())
+
+def _google_travel_minutes(origin: str, destination: str, depart_local: dt.datetime) -> int:
+    if not GOOGLE_MAPS_API_KEY:
+        # Fallback: rough 30min if no key configured
+        return 30
+    url = "https://maps.googleapis.com/maps/api/directions/json"
+    params = {
+        "origin": origin,
+        "destination": destination,
+        "mode": "driving",
+        "departure_time": _unix_epoch(depart_local),
+        "traffic_model": TRAFFIC_MODEL,
+        "key": GOOGLE_MAPS_API_KEY,
+    }
+    r = requests.get(url, params=params, timeout=10)
+    r.raise_for_status()
+    data = r.json()
+    routes = (data.get("routes") or [])
+    if not routes:  # fallback
+        return 30
+    leg = (routes[0].get("legs") or [{}])[0]
+    dur = leg.get("duration_in_traffic") or leg.get("duration") or {}
+    sec = int(dur.get("value", 1800))
+    return max(1, math.ceil(sec / 60))
+
+def _weather_buffer_minutes(at_local: dt.datetime) -> int:
+    if not WEATHERAPI_KEY:
+        return 0
+    url = "http://api.weatherapi.com/v1/forecast.json"
+    params = {"key": WEATHERAPI_KEY, "q": HOME_ADDRESS or "auto:ip", "hours": 1}
+    try:
+        r = requests.get(url, params=params, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+        hlist = (((data.get("forecast") or {}).get("forecastday") or [{}])[0].get("hour") or [])
+        target_hour = at_local.replace(minute=0, second=0, microsecond=0)
+        code = None
+        mm_rain = mm_snow = 0.0
+        for h in hlist:
+            t = h.get("time")
+            if not t:
+                continue
+            if t.startswith(target_hour.strftime("%Y-%m-%d %H:")):
+                code = int((h.get("condition") or {}).get("code", 0))
+                mm_rain = float(h.get("precip_mm", 0.0))
+                mm_snow = float(h.get("snow_cm", 0.0)) * 10.0
+                break
+        if code is None:
+            return 0
+        if mm_snow > 0.0:
+            return WEATHER_BUFFER_SNOW
+        if mm_rain >= 1.0:
+            return WEATHER_BUFFER_RAIN
+        return 0
+    except Exception:
+        return 0
+    
+def _parse_hhmm(s: str) -> dt.time | None:
+    try:
+        h, m = s.strip().split(":")
+        h, m = int(h), int(m)
+        if 0 <= h < 24 and 0 <= m < 60:
+            return dt.time(hour=h, minute=m)
+    except Exception:
+        pass
+    return None
+
+def plan_alarm(arrival_hhmm: str, destination: str, prep_minutes: Optional[int]) -> dict:
+    """Return {'alarm_time':'HH:MM','plan':{...}} in local time."""
+    prep = PREP_MINUTES if not prep_minutes or prep_minutes <= 0 else prep_minutes
+    tt = _parse_hhmm(arrival_hhmm)
+    if not tt:
+        return {"error": "invalid arrival_time"}
+    today = dt.datetime.now(tz=_tz).date()
+    arrival_dt = dt.datetime.combine(today, tt, tzinfo=_tz)
+    # If arrival time already passed today, assume tomorrow
+    if arrival_dt < dt.datetime.now(tz=_tz):
+        arrival_dt = arrival_dt + dt.timedelta(days=1)
+
+    # Iterate: travel depends on departure, but one or two passes is enough
+    # Start with a guess: depart = arrival - fixed 45 min
+    depart_guess = arrival_dt - dt.timedelta(minutes=45)
+    travel_min = _google_travel_minutes(HOME_ADDRESS or "home", destination, depart_guess)
+    weather_buf = _weather_buffer_minutes(depart_guess)
+    depart_dt = arrival_dt - dt.timedelta(minutes=prep + travel_min + weather_buf)
+
+    # refine once with updated depart time
+    travel_min = _google_travel_minutes(HOME_ADDRESS or "home", destination, depart_dt)
+    weather_buf = _weather_buffer_minutes(depart_dt)
+    depart_dt = arrival_dt - dt.timedelta(minutes=prep + travel_min + weather_buf)
+
+    alarm_dt = depart_dt  # wake == depart; if you want pre-depart buffer, add here
+    hhmm = alarm_dt.strftime("%H:%M")
+    return {
+        "alarm_time": hhmm,
+        "plan": {
+            "arrival": arrival_dt.strftime("%H:%M"),
+            "destination": destination,
+            "prep_minutes": prep,
+            "travel_minutes": travel_min,
+            "weather_buffer": weather_buf,
+            "traffic_model": TRAFFIC_MODEL,
+        },
+    }
 
 _gemini_model = None
 def _get_gemini():
@@ -228,6 +380,18 @@ def health():
         "maps_enabled": bool(GOOGLE_MAPS_API_KEY),
         "home_address": HOME_ADDRESS or None
     })
+    return jsonify({
+        "status":"ok",
+        "device":DEVICE,
+        "whisper_model":MODEL_SIZE,
+        "tts_default":TTS_ENGINE_DEFAULT,
+        "coqui_model":COQUI_MODEL,
+        "gemini_enabled": bool(GEMINI_API_KEY),
+        "gemini_model": GEMINI_MODEL if GEMINI_API_KEY else None,
+        "weather_enabled": bool(WEATHERAPI_KEY),
+        "maps_enabled": bool(GOOGLE_MAPS_API_KEY),
+        "home_address": HOME_ADDRESS or None
+    })
 
 @app.post("/transcribe")
 def transcribe():
@@ -260,6 +424,14 @@ def transcribe():
         text = "".join(s["text"] for s in segs).strip()
 
         # NLU (don’t trigger UI here; Pi will)
+        nlu = gemini_nlu(text) or (get_intent(text) or {"intent": "none"})
+
+        if isinstance(nlu, dict) and nlu.get("intent") == "plan_commute":
+            arrival = nlu.get("arrival_time")
+            dest    = nlu.get("destination") or ""
+            prep_m  = nlu.get("prep_minutes")
+            if arrival and dest:
+                nlu["alarm_proposal"] = plan_alarm(arrival, dest, prep_m)
         nlu = gemini_nlu(text) or (get_intent(text) or {"intent": "none"})
 
         if isinstance(nlu, dict) and nlu.get("intent") == "plan_commute":
