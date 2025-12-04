@@ -384,9 +384,15 @@ def main():
                     try:
                         if arec_proc:
                             arec_proc.terminate()
+                            try:
+                                arec_proc.wait(timeout=0.5)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                     arec_proc = None
+                    # Brief pause to let ALSA release the device before recording
+                    time.sleep(0.25)
                 else:
                     # Fully release the device before spawning arecord
                     try:
