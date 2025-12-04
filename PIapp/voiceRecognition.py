@@ -249,6 +249,7 @@ def get_intent(text: str):
     return _local_regex_nlu(text)
 
 def main():
+    global STOP
     if not ACCESS_KEY:
         raise RuntimeError("PICOVOICE_ACCESS_KEY is not set. Export it before running.")
 
