@@ -347,7 +347,6 @@ def main():
         arec_proc = _start_arecord_stream()
         print(f"Listening for {listen_desc} via arecord stream on {ARECORD_CARD} (16k/mono)...")
 
-    popup = _Popup()
     last_trigger = 0.0
 
     try:
@@ -377,8 +376,7 @@ def main():
                 last_trigger = now
 
                 print("Wake word detected!")
-                if popup:
-                    popup.show("Listening...")
+                _status("Listening...")
                 # Free the device so 'arecord' can open it
                 if use_arecord_stream:
                     try:
@@ -413,8 +411,7 @@ def main():
                 wav_path = f"{SAVE_DIR}/wake_{ts}.wav"
                 try:
                     record_wav(wav_path)
-                    if popup:
-                        popup.update("Recognizing...")
+                    _status("Recognizing...")
                     text = send_to_server(wav_path)
                     try:
                         # Map recognized text to a UI view and emit a command file for the Tk UI
@@ -439,21 +436,18 @@ def main():
                             _emit_ui_command(v, text)
                     except Exception:
                         pass
-                    if popup:
-                        suffix = "..." if len(text) > 60 else ""
-                        popup.update(f"Heard: {text[:60]}{suffix}")
-                        # Briefly show the result
-                        time.sleep(1.2)
+                    suffix = "..." if len(text) > 60 else ""
+                    _status(f"Heard: {text[:60]}{suffix}")
+                    # Briefly show the result
+                    time.sleep(1.2)
                 except subprocess.CalledProcessError as e:
                     print(f"arecord failed: {e}")
-                    if popup:
-                        popup.update("Mic error")
-                        time.sleep(0.8)
+                    _status("Mic error")
+                    time.sleep(0.8)
                 except requests.RequestException as e:
                     print(f"HTTP error: {e}")
-                    if popup:
-                        popup.update("Network error")
-                        time.sleep(0.8)
+                    _status(f"Network error: {e}")
+                    time.sleep(0.8)
                 finally:
                     # Resume wake-word listening
                     if not STOP:
@@ -487,11 +481,6 @@ def main():
             except Exception:
                 pass
         porcupine.delete()
-        try:
-            if popup:
-                popup.destroy()
-        except Exception:
-            pass
         print("Cleaned up. Bye!")
 
 if __name__ == "__main__":
