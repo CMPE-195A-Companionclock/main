@@ -1,23 +1,16 @@
 import os, tempfile, subprocess, json, asyncio, shutil, re, time, math
+import threading
 import datetime as dt
 from typing import Optional
-import threading
-
 import requests
-import os, tempfile, subprocess, json, asyncio, shutil, re, time, math
-import datetime as dt
-from typing import Optional
-import threading
 
-import requests
 from flask import Flask, request, jsonify, send_file
 from faster_whisper import WhisperModel
-from typing import Optional
 from PIapp.nlu import get_intent  # lightweight NLU, avoids pvporcupine dependency
-import threading
-from dotenv import load_dotenv; load_dotenv()
+from dotenv import load_dotenv
 
 load_dotenv()
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash").strip()
 WEATHERAPI_KEY = os.environ.get("WEATHERAPI_KEY", "").strip()
@@ -60,11 +53,31 @@ def _get_gemini():
         _gemini_model = genai.GenerativeModel(GEMINI_MODEL)
     return _gemini_model
 
-_GEMINI_PLAN_PROMPT = """You extract commute planning parameters.
-Return STRICT JSON only, fields:
-- "intent": "plan_commute" if user is asking to plan morning or set a wake time for a trip; else "none".
-- If planning: include "arrival_time" as "HH:MM" 24h, "destination" as a string address/place name,
-  and optional "prep_minutes" as integer if user mentioned prep time; else omit.
+_GEMINI_PLAN_PROMPT = """
+You extract commute planning parameters.
+Return STRICT JSON only with these fields:
+
+- "intent": "plan_commute" if the user is asking to plan a commute, morning, or wake time for a trip.
+  Otherwise, use "intent": "none".
+
+If "intent" is "plan_commute", also include:
+- "arrival_time": "HH:MM" 24h string when the user clearly gave an arrival time;
+  otherwise null.
+- "destination": string with the place/address when the user clearly gave a destination;
+  otherwise null.
+- "prep_minutes": integer when the user clearly mentioned prep/get-ready time;
+  otherwise null.
+- "origin": string when the user clearly specified a non-default starting point
+  (e.g. "from the office", "from my parents' house"); otherwise null.
+
+Additionally include:
+- "missing": an array listing which of ["arrival_time", "destination", "prep_minutes", "origin"]
+  are required but missing or ambiguous. For example:
+  ["destination"], ["arrival_time", "destination"], or [] if nothing important is missing.
+
+When something is ambiguous like "the airport", "the store", or "this morning"
+and you cannot confidently resolve it to a concrete value, treat the field as null
+and add it to "missing" instead of guessing.
 
 Only output JSON. User said: {text}
 """
@@ -119,7 +132,7 @@ def _weather_buffer_minutes(at_local: dt.datetime) -> int:
     if not WEATHERAPI_KEY:
         return 0
     url = "http://api.weatherapi.com/v1/forecast.json"
-    params = {"key": WEATHERAPI_KEY, "q": HOME_ADDRESS or "auto:ip", "hours": 1}
+    params = {"key": WEATHERAPI_KEY, "q": HOME_ADDRESS or "auto:ip", "days": 1}
     try:
         r = requests.get(url, params=params, timeout=8)
         r.raise_for_status()
@@ -147,7 +160,7 @@ def _weather_buffer_minutes(at_local: dt.datetime) -> int:
     except Exception:
         return 0
     
-def _parse_hhmm(s: str) -> dt.time | None:
+def _parse_hhmm(s: str) -> Optional[dt.time]:
     try:
         h, m = s.strip().split(":")
         h, m = int(h), int(m)
@@ -157,7 +170,7 @@ def _parse_hhmm(s: str) -> dt.time | None:
         pass
     return None
 
-def plan_alarm(arrival_hhmm: str, destination: str, prep_minutes: Optional[int]) -> dict:
+def plan_alarm(arrival_hhmm: str, destination: str, prep_minutes: Optional[int], origin: Optional[str] = None) -> dict:
     """Return {'alarm_time':'HH:MM','plan':{...}} in local time."""
     prep = PREP_MINUTES if not prep_minutes or prep_minutes <= 0 else prep_minutes
     tt = _parse_hhmm(arrival_hhmm)
@@ -169,15 +182,16 @@ def plan_alarm(arrival_hhmm: str, destination: str, prep_minutes: Optional[int])
     if arrival_dt < dt.datetime.now(tz=_tz):
         arrival_dt = arrival_dt + dt.timedelta(days=1)
 
+    orig = origin or HOME_ADDRESS or "home"
     # Iterate: travel depends on departure, but one or two passes is enough
     # Start with a guess: depart = arrival - fixed 45 min
     depart_guess = arrival_dt - dt.timedelta(minutes=45)
-    travel_min = _google_travel_minutes(HOME_ADDRESS or "home", destination, depart_guess)
+    travel_min = _google_travel_minutes(orig, destination, depart_guess)
     weather_buf = _weather_buffer_minutes(depart_guess)
     depart_dt = arrival_dt - dt.timedelta(minutes=prep + travel_min + weather_buf)
 
     # refine once with updated depart time
-    travel_min = _google_travel_minutes(HOME_ADDRESS or "home", destination, depart_dt)
+    travel_min = _google_travel_minutes(orig, destination, depart_dt)
     weather_buf = _weather_buffer_minutes(depart_dt)
     depart_dt = arrival_dt - dt.timedelta(minutes=prep + travel_min + weather_buf)
 
@@ -188,158 +202,14 @@ def plan_alarm(arrival_hhmm: str, destination: str, prep_minutes: Optional[int])
         "plan": {
             "arrival": arrival_dt.strftime("%H:%M"),
             "destination": destination,
+            "origin": orig,
             "prep_minutes": prep,
             "travel_minutes": travel_min,
             "weather_buffer": weather_buf,
             "traffic_model": TRAFFIC_MODEL,
         },
     }
-
-_gemini_model = None
-def _get_gemini():
-    global _gemini_model
-    if not GEMINI_API_KEY:
-        return None
-    if _gemini_model is None:
-        import google.generativeai as genai
-        genai.configure(api_key=GEMINI_API_KEY)
-        _gemini_model = genai.GenerativeModel(GEMINI_MODEL)
-    return _gemini_model
-
-_GEMINI_PLAN_PROMPT = """You extract commute planning parameters.
-Return STRICT JSON only, fields:
-- "intent": "plan_commute" if user is asking to plan morning or set a wake time for a trip; else "none".
-- If planning: include "arrival_time" as "HH:MM" 24h, "destination" as a string address/place name,
-  and optional "prep_minutes" as integer if user mentioned prep time; else omit.
-
-Only output JSON. User said: {text}
-"""
-
-def gemini_nlu(text: str) -> Optional[dict]:
-    if not text or not GEMINI_API_KEY:
-        return None
-    try:
-        m = _get_gemini()
-        if m is None:
-            return None
-        resp = m.generate_content(_GEMINI_PLAN_PROMPT.format(text=text))
-        raw = (resp.text or "").strip()
-        j = re.search(r"\{.*\}", raw, flags=re.DOTALL)
-        if not j:
-            return None
-        data = json.loads(j.group(0))
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        pass
-    return None
-
-def _unix_epoch(dts: dt.datetime) -> int:
-    return int(dts.timestamp())
-
-def _google_travel_minutes(origin: str, destination: str, depart_local: dt.datetime) -> int:
-    if not GOOGLE_MAPS_API_KEY:
-        # Fallback: rough 30min if no key configured
-        return 30
-    url = "https://maps.googleapis.com/maps/api/directions/json"
-    params = {
-        "origin": origin,
-        "destination": destination,
-        "mode": "driving",
-        "departure_time": _unix_epoch(depart_local),
-        "traffic_model": TRAFFIC_MODEL,
-        "key": GOOGLE_MAPS_API_KEY,
-    }
-    r = requests.get(url, params=params, timeout=10)
-    r.raise_for_status()
-    data = r.json()
-    routes = (data.get("routes") or [])
-    if not routes:  # fallback
-        return 30
-    leg = (routes[0].get("legs") or [{}])[0]
-    dur = leg.get("duration_in_traffic") or leg.get("duration") or {}
-    sec = int(dur.get("value", 1800))
-    return max(1, math.ceil(sec / 60))
-
-def _weather_buffer_minutes(at_local: dt.datetime) -> int:
-    if not WEATHERAPI_KEY:
-        return 0
-    url = "http://api.weatherapi.com/v1/forecast.json"
-    params = {"key": WEATHERAPI_KEY, "q": HOME_ADDRESS or "auto:ip", "hours": 1}
-    try:
-        r = requests.get(url, params=params, timeout=8)
-        r.raise_for_status()
-        data = r.json()
-        hlist = (((data.get("forecast") or {}).get("forecastday") or [{}])[0].get("hour") or [])
-        target_hour = at_local.replace(minute=0, second=0, microsecond=0)
-        code = None
-        mm_rain = mm_snow = 0.0
-        for h in hlist:
-            t = h.get("time")
-            if not t:
-                continue
-            if t.startswith(target_hour.strftime("%Y-%m-%d %H:")):
-                code = int((h.get("condition") or {}).get("code", 0))
-                mm_rain = float(h.get("precip_mm", 0.0))
-                mm_snow = float(h.get("snow_cm", 0.0)) * 10.0
-                break
-        if code is None:
-            return 0
-        if mm_snow > 0.0:
-            return WEATHER_BUFFER_SNOW
-        if mm_rain >= 1.0:
-            return WEATHER_BUFFER_RAIN
-        return 0
-    except Exception:
-        return 0
     
-def _parse_hhmm(s: str) -> dt.time | None:
-    try:
-        h, m = s.strip().split(":")
-        h, m = int(h), int(m)
-        if 0 <= h < 24 and 0 <= m < 60:
-            return dt.time(hour=h, minute=m)
-    except Exception:
-        pass
-    return None
-
-def plan_alarm(arrival_hhmm: str, destination: str, prep_minutes: Optional[int]) -> dict:
-    """Return {'alarm_time':'HH:MM','plan':{...}} in local time."""
-    prep = PREP_MINUTES if not prep_minutes or prep_minutes <= 0 else prep_minutes
-    tt = _parse_hhmm(arrival_hhmm)
-    if not tt:
-        return {"error": "invalid arrival_time"}
-    today = dt.datetime.now(tz=_tz).date()
-    arrival_dt = dt.datetime.combine(today, tt, tzinfo=_tz)
-    # If arrival time already passed today, assume tomorrow
-    if arrival_dt < dt.datetime.now(tz=_tz):
-        arrival_dt = arrival_dt + dt.timedelta(days=1)
-
-    # Iterate: travel depends on departure, but one or two passes is enough
-    # Start with a guess: depart = arrival - fixed 45 min
-    depart_guess = arrival_dt - dt.timedelta(minutes=45)
-    travel_min = _google_travel_minutes(HOME_ADDRESS or "home", destination, depart_guess)
-    weather_buf = _weather_buffer_minutes(depart_guess)
-    depart_dt = arrival_dt - dt.timedelta(minutes=prep + travel_min + weather_buf)
-
-    # refine once with updated depart time
-    travel_min = _google_travel_minutes(HOME_ADDRESS or "home", destination, depart_dt)
-    weather_buf = _weather_buffer_minutes(depart_dt)
-    depart_dt = arrival_dt - dt.timedelta(minutes=prep + travel_min + weather_buf)
-
-    alarm_dt = depart_dt  # wake == depart; if you want pre-depart buffer, add here
-    hhmm = alarm_dt.strftime("%H:%M")
-    return {
-        "alarm_time": hhmm,
-        "plan": {
-            "arrival": arrival_dt.strftime("%H:%M"),
-            "destination": destination,
-            "prep_minutes": prep,
-            "travel_minutes": travel_min,
-            "weather_buffer": weather_buf,
-            "traffic_model": TRAFFIC_MODEL,
-        },
-    }
 
 # Helpers
 def _have_ffmpeg() -> bool:
@@ -351,7 +221,9 @@ def to_mono16k(in_path: str) -> str:
         raise RuntimeError("ffmpeg not found; install ffmpeg and ensure it is on PATH")
     subprocess.run(
         ["ffmpeg","-y","-i", in_path, "-ac","1","-ar","16000","-f","wav", out_path],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True
+        stdout=subprocess.DEVNULL, 
+        stderr=subprocess.DEVNULL, 
+        check=True
     )
     return out_path
 
@@ -380,18 +252,6 @@ def health():
         "maps_enabled": bool(GOOGLE_MAPS_API_KEY),
         "home_address": HOME_ADDRESS or None
     })
-    return jsonify({
-        "status":"ok",
-        "device":DEVICE,
-        "whisper_model":MODEL_SIZE,
-        "tts_default":TTS_ENGINE_DEFAULT,
-        "coqui_model":COQUI_MODEL,
-        "gemini_enabled": bool(GEMINI_API_KEY),
-        "gemini_model": GEMINI_MODEL if GEMINI_API_KEY else None,
-        "weather_enabled": bool(WEATHERAPI_KEY),
-        "maps_enabled": bool(GOOGLE_MAPS_API_KEY),
-        "home_address": HOME_ADDRESS or None
-    })
 
 @app.post("/transcribe")
 def transcribe():
@@ -401,7 +261,8 @@ def transcribe():
 
     # Save upload
     suffix = os.path.splitext(f.filename or "in.wav")[1] or ".wav"
-    in_fd, in_path = tempfile.mkstemp(suffix=suffix); os.close(in_fd)
+    in_fd, in_path = tempfile.mkstemp(suffix=suffix)
+    os.close(in_fd)
     f.save(in_path)
     try:
         print(f"[transcribe] got upload: {in_path}, size={os.path.getsize(in_path)}")
@@ -423,23 +284,38 @@ def transcribe():
         segs = [{"start": round(s.start,2), "end": round(s.end,2), "text": s.text} for s in segments]
         text = "".join(s["text"] for s in segs).strip()
 
-        # NLU (don’t trigger UI here; Pi will)
+        # NLU
         nlu = gemini_nlu(text) or (get_intent(text) or {"intent": "none"})
 
         if isinstance(nlu, dict) and nlu.get("intent") == "plan_commute":
             arrival = nlu.get("arrival_time")
             dest    = nlu.get("destination") or ""
             prep_m  = nlu.get("prep_minutes")
-            if arrival and dest:
-                nlu["alarm_proposal"] = plan_alarm(arrival, dest, prep_m)
-        nlu = gemini_nlu(text) or (get_intent(text) or {"intent": "none"})
+            origin  = nlu.get("origin")  # may be None
 
-        if isinstance(nlu, dict) and nlu.get("intent") == "plan_commute":
-            arrival = nlu.get("arrival_time")
-            dest    = nlu.get("destination") or ""
-            prep_m  = nlu.get("prep_minutes")
-            if arrival and dest:
-                nlu["alarm_proposal"] = plan_alarm(arrival, dest, prep_m)
+            # Normalize missing list
+            missing = nlu.get("missing")
+            if not isinstance(missing, list):
+                missing = []
+            # If Gemini didn't fill "missing", derive it here
+            if "arrival_time" not in missing and not arrival:
+                missing.append("arrival_time")
+            if "destination" not in missing and not dest:
+                missing.append("destination")
+            if "prep_minutes" not in missing and not prep_m:
+                missing.append("prep_minutes")
+            if "origin" not in missing and not origin:
+                # origin is optional; usually we just fall back to HOME_ADDRESS
+                pass
+
+            nlu["missing"] = missing
+
+            # Only compute plan if nothing critical is missing
+            if "arrival_time" not in missing and "destination" not in missing and arrival and dest:
+                # Allow Gemini to override origin if present, otherwise use HOME_ADDRESS
+                orig = origin or HOME_ADDRESS or "home"
+                plan = plan_alarm(arrival, dest, prep_m, origin=orig)
+                nlu["alarm_proposal"] = plan
 
         return jsonify({
             "text": text,
@@ -450,13 +326,13 @@ def transcribe():
         })
     except Exception as e:
         return jsonify({"error": f"transcription failed: {type(e).__name__}: {e}"}), 400
-    # finally:
-    #     for p in (in_path, locals().get("conv_path")):
-    #         try:
-    #             if p and os.path.exists(p):
-    #                 os.remove(p)
-    #         except Exception:
-    #             pass
+    finally:
+        for p in (in_path, locals().get("conv_path")):
+            try:
+                if p and os.path.exists(p):
+                    os.remove(p)
+            except Exception:
+                pass
 
 @app.get("/tts")
 def tts():
@@ -469,29 +345,41 @@ def tts():
     if not text:
         return jsonify({"error":"missing ?text"}), 400
 
-    fd_wav, wav_path = tempfile.mkstemp(suffix=".wav"); os.close(fd_wav)
-
     if engine == "coqui":
+        fd_wav, wav_path = tempfile.mkstemp(suffix=".wav") 
+        os.close(fd_wav)
         try:
             tts = _get_coqui()
             y = tts.tts(text, speaker="p326")
             sr = getattr(getattr(tts,"synthesizer",None), "output_sample_rate", None) or 22050
             sf.write(wav_path, np.array(y), int(sr), subtype="PCM_16")
-            tmp16 = wav_path + ".tmp16.wav"
-            subprocess.run(["ffmpeg","-y","-i", wav_path, "-ac","1","-ar","16000", tmp16],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True)
-            os.replace(tmp16, wav_path)
-        except Exception as e:
-            try: os.remove(wav_path)
-            except: pass
-            return jsonify({"error": f"coqui-tts failed: {e}"}), 500
-        resp = send_file(wav_path, mimetype="audio/wav", as_attachment=False, download_name="out.wav")
-        try: os.remove(wav_path)
-        except: pass
-        return resp
 
-    # Edge-tts
-    fd_mp3, mp3_path = tempfile.mkstemp(suffix=".mp3"); os.close(fd_mp3)
+            tmp16 = wav_path + ".tmp16.wav"
+            subprocess.run(
+                ["ffmpeg","-y","-i", wav_path, "-ac","1","-ar","16000", tmp16],
+                stdout=subprocess.DEVNULL, 
+                stderr=subprocess.PIPE, 
+                check=True
+            )
+            os.replace(tmp16, wav_path)
+            resp = send_file(wav_path, mimetype="audio/wav", as_attachment=False, download_name="out.wav")
+            try: 
+                os.remove(wav_path)
+            except Exception: 
+                pass
+            return resp
+        except Exception as e:
+            print(f"[tts] Coqui TTS failed, falling back to edge-tts: {e}")
+            try:
+                os.remove(wav_path)
+            except Exception:
+                pass
+
+    fd_wav, wav_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd_wav)
+    fd_mp3, mp3_path = tempfile.mkstemp(suffix=".mp3"); 
+    os.close(fd_mp3)
+
     async def synth_to_mp3():
         comm = edge_tts.Communicate(text, voice=voice, rate=rate)
         with open(mp3_path, "wb") as f:
@@ -505,18 +393,25 @@ def tts():
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(synth_to_mp3()); loop.close()
+            loop.run_until_complete(synth_to_mp3()); 
+            loop.close()
 
-        subprocess.run(["ffmpeg","-y","-i", mp3_path, "-ac","1","-ar","16000","-f","wav", wav_path],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=True)
+        subprocess.run(
+            ["ffmpeg","-y","-i", mp3_path, "-ac","1","-ar","16000","-f","wav", wav_path],
+            stdout=subprocess.DEVNULL, 
+            stderr=subprocess.PIPE, 
+            check=True
+        )
         resp = send_file(wav_path, mimetype="audio/wav", as_attachment=False, download_name="out.wav")
         return resp
     except Exception as e:
         return jsonify({"error": f"edge-tts synth failed: {e}"}), 500
-    # finally:
-    #     for p in (mp3_path, wav_path):
-    #         try: os.remove(p)
-    #         except: pass
+    finally:
+        for p in (mp3_path, wav_path):
+            try: 
+                os.remove(p)
+            except: 
+                pass
 
 def _warmup_coqui():
     try:
