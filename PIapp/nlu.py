@@ -5,14 +5,16 @@ def get_intent(text: str) -> Dict:
     t = (text or "").strip().lower()
     if not t:
         return {"intent": "none"}
+    
+    words = t.split()
 
-    if "weather" in t:
+    if any(w in words for w in ("weather", "forecast", "temperature", "rain", "sunny")):
         return {"intent": "goto", "view": "weather"}
-    if "calendar" in t:
+    if any(w in words for w in ("calendar", "schedule", "appointments", "events", "month")):
         return {"intent": "goto", "view": "calendar"}
-    if "alarm" in t:
+    if any(w in words for w in ("alarm", "wake", "wake-up", "wake-up", "wake-up", "timer")):
         return {"intent": "goto", "view": "alarm"}
-    if "clock" in t:
+    if any(w in words for w in ("clock", "time", "current", "now", "what's", "whats")):
         return {"intent": "goto", "view": "clock"}
 
     return {"intent": "none"}
