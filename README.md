@@ -71,3 +71,51 @@ Troubleshooting
 6. Move the program file with Win SCP to the pi OS
 7. Use Real VNC Viwer to controll the PI os
 8. See https://docs.keyestudio.com/projects/KS0314/en/latest/docs/KS0314.html for installing the driver of the mic
+
+___________________________________________________________________________________________________________________
+## Google Calendar Integration Setup
+
+1. Get GoogleCal API credentials:
+   - Visit https://console.cloud.google.com
+   - Create a project and enable Google Calendar API
+   - Create OAuth 2.0 credentials (Desktop app)
+   - Download as `credentials.json`
+
+2. Install dependencies:
+```bash
+   pip3 install --break-system-packages google-api-python-client google-auth-httplib2 google-auth-oauthlib
+```
+
+3. Authenticate:
+```bash
+   python3 -c "from PIapp.calendar_service import get_calendar_service; get_calendar_service()"
+```
+
+### Environment Variables
+
+Add to your `.env` file:
+```bash
+GOOGLE_CREDENTIALS_PATH=credentials.json
+GOOGLE_TOKEN_PATH=token.pickle
+CALENDAR_REFRESH_INTERVAL=300
+CALENDAR_DAYS_AHEAD=7
+CALENDAR_MAX_EVENTS=50
+```
+
+### Usage
+
+- View calendar in terminal: `python3 main.py calendar`
+- Calendar page in UI: Navigate to Calendar in the main interface
+
+### For AI Alarm Integration
+```python
+from PIapp.calendar_service import get_calendar_service
+
+service = get_calendar_service()
+next_event = service.get_next_event()
+
+if next_event:
+    event_time = next_event['start_datetime']
+    location = next_event['location']
+    # Feed to AI alarm logic
+```
