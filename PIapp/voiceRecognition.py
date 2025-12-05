@@ -212,6 +212,7 @@ def send_to_server(path: str) -> str:
             resp = requests.post(TRANSCRIBE_EP, files={"audio": f}, timeout=30)
         resp.raise_for_status()
         data = resp.json()
+
         text = (data.get("text") or "").strip()
         nlu  = data.get("nlu") or {"intent": "none"}
 
@@ -219,11 +220,28 @@ def send_to_server(path: str) -> str:
             "nlu": nlu,
             "text": text,
         }
+
         intent = (nlu.get("intent") or "").lower()
+
         if intent == "goto" and nlu.get("view"):
             payload.update({"cmd": "goto", "view": nlu["view"]})
-        elif intent == "set_alarm" and nlu.get("alarm_time"):
-            payload.update({"cmd": "set_alarm", "time": nlu["alarm_time"]})
+
+        elif intent == "set_alarm":
+            missing = nlu.get("missing") or []
+            alarm_time = nlu.get("alarm_time")
+
+            # Case 1: we’re missing AM/PM ask the user
+            if "meridiem" in missing:
+                payload.update({
+                    "cmd": "alarm_missing",
+                    "missing": missing,
+                    "hour": nlu.get("hour"),
+                    "minute": nlu.get("minute"),
+                })
+            elif alarm_time:
+                # Fully specified time like "set alarm for 5:30 am"
+                payload.update({"cmd": "set_alarm", "time": alarm_time})
+                
         elif intent == "plan_commute":
             missing = nlu.get("missing") or []
             payload["missing"] = missing
