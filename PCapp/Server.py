@@ -285,34 +285,38 @@ def transcribe():
         text = "".join(s["text"] for s in segs).strip()
 
         # NLU
-        nlu = gemini_nlu(text) or (get_intent(text) or {"intent": "none"})
+        local_nlu = get_intent(text) or {"intent": "none"}
+        
+        if local_nlu.get("intent") == "set_alarm":
+            nlu = local_nlu
+        else:
+            # Otherwise let Gemini try (commute planning etc.),
+            # falling back to local_nlu if Gemini returns nothing.
+            nlu = gemini_nlu(text) or local_nlu
 
         if isinstance(nlu, dict) and nlu.get("intent") == "plan_commute":
             arrival = nlu.get("arrival_time")
             dest    = nlu.get("destination") or ""
             prep_m  = nlu.get("prep_minutes")
-            origin  = nlu.get("origin")  # may be None
+            origin  = nlu.get("origin")
 
             # Normalize missing list
             missing = nlu.get("missing")
             if not isinstance(missing, list):
                 missing = []
-            # If Gemini didn't fill "missing", derive it here
+
             if "arrival_time" not in missing and not arrival:
                 missing.append("arrival_time")
             if "destination" not in missing and not dest:
                 missing.append("destination")
             if "prep_minutes" not in missing and not prep_m:
                 missing.append("prep_minutes")
-            if "origin" not in missing and not origin:
-                # origin is optional; usually we just fall back to HOME_ADDRESS
-                pass
+            # origin is optional; usually we fall back to HOME_ADDRESS
 
             nlu["missing"] = missing
 
             # Only compute plan if nothing critical is missing
             if "arrival_time" not in missing and "destination" not in missing and arrival and dest:
-                # Allow Gemini to override origin if present, otherwise use HOME_ADDRESS
                 orig = origin or HOME_ADDRESS or "home"
                 plan = plan_alarm(arrival, dest, prep_m, origin=orig)
                 nlu["alarm_proposal"] = plan
