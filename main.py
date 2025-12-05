@@ -1,13 +1,16 @@
 import argparse
 import os
+import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import Optional
 
+import requests
 from dotenv import load_dotenv
 
-from PIapp.nlu import get_intent
+from PIapp.nlu import get_intent as nlu_get_intent
 from app_router import goto_view, schedule_alarm
 
 BASE_DIR = Path(__file__).resolve().parent / "PIapp"
@@ -52,7 +55,7 @@ def route_intent(intent: dict):
 
 #legacy helper
 def handle_recognized_text(text: str):
-    intent = get_intent(text)
+    intent = nlu_get_intent(text)
     print("NLU:", intent)
     route_intent(intent)
 
@@ -159,6 +162,68 @@ def run_touch_ui(fullscreen: bool = True):
         "alarm": {"img": None, "sig": None},
     }
 
+    alarm_sound = {"path": None}
+
+    def _ensure_alarm_sound() -> Optional[str]:
+        """Create a small WAV beep for the alarm if it doesn't exist."""
+        path = os.path.join(LOCAL_TMP, "alarm_beep.wav")
+        if alarm_sound.get("path") and os.path.exists(alarm_sound["path"]):
+            return alarm_sound["path"]
+        try:
+            os.makedirs(LOCAL_TMP, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            if not os.path.exists(path):
+                import math
+                import wave
+                import array
+
+                sample_rate = 16000
+                duration = 1.0  # seconds
+                freq = 880.0
+                volume = 0.35
+                samples = array.array("h")
+                total = int(sample_rate * duration)
+                for i in range(total):
+                    val = int(volume * 32767 * math.sin(2 * math.pi * freq * (i / sample_rate)))
+                    samples.append(val)
+                with wave.open(path, "w") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(sample_rate)
+                    wf.writeframes(samples.tobytes())
+            alarm_sound["path"] = path
+            return path
+        except Exception as e:
+            print("Alarm sound generation failed:", e)
+            return None
+
+    def play_alarm_sound() -> bool:
+        """Play the generated alarm beep; returns True on success."""
+        path = _ensure_alarm_sound()
+        if not path:
+            return False
+        # Windows fallback: winsound
+        if sys.platform.startswith("win"):
+            try:
+                import winsound
+
+                winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                return True
+            except Exception as e:
+                print("Alarm sound playback failed (winsound):", e)
+        # POSIX: try aplay
+        try:
+            res = subprocess.run(
+                ["aplay", "-q", path], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            if res.returncode == 0:
+                return True
+        except Exception as e:
+            print("Alarm sound playback failed (aplay):", e)
+        return False
+    
     def render():
         nonlocal weather_data
         v = mode["view"]
@@ -323,7 +388,34 @@ def run_touch_ui(fullscreen: bool = True):
                                     speak("How many minutes do you need to get ready before leaving?")
                                 else:
                                     speak("I need a little more information to plan your commute. Please say when and where you need to be.")
+                        elif cmd == "alarm_missing":
+                            missing = payload.get("missing") or []
+                            hour = payload.get("hour")
+                            minute = payload.get("minute")
 
+                            try:
+                                from PIapp.pi_tts import speak
+                            except Exception:
+                                speak = None
+
+                            if speak:
+                                if "meridiem" in missing and isinstance(hour, int):
+                                    # 5 → "5 o'clock"
+                                    if minute in (0, None):
+                                        spoken_time = f"{hour} o'clock"
+                                    else:
+                                        spoken_time = f"{hour} {minute:02d}"
+
+                                    speak(
+                                        f"Did you mean {spoken_time} A M or {spoken_time} P M? "
+                                        f"Please repeat and say, for example, "
+                                        f"set an alarm for {hour} A M."
+                                    )
+                                else:
+                                    speak(
+                                        "Did you mean A M or P M? "
+                                        "Please repeat the alarm with A M or P M."
+                                    )
 
                     try:
                         os.remove(VOICE_CMD_PATH)
@@ -346,10 +438,13 @@ def run_touch_ui(fullscreen: bool = True):
                 if key in RANG_RECENT:
                     continue
                 if a.get("hour") == now_h and a.get("minute") == now_m:
+                    played = play_alarm_sound()
                     try:
                         speak("Alarm ringing.")
                     except Exception as e:
                         print("TTS alarm error:", e)
+                        if not played:
+                            print("No alarm sound played.")
                     RANG_RECENT.add(key)
         except Exception:
             pass
