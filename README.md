@@ -83,7 +83,7 @@ ________________________________________________________________________________
 
 2. Install dependencies:
 ```bash
-   pip3 install --break-system-packages google-api-python-client google-auth-httplib2 google-auth-oauthlib
+   pip3 install --break-system-packages -r PIapp/requirements_PI.txt
 ```
 
 3. Authenticate:
