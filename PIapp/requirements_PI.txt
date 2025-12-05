@@ -10,3 +10,9 @@ pillow
 # Wake word (optional; required for PIapp/voiceRecognition.py)
 pvporcupine
 pvrecorder
+
+# Google Calendar Integration
+google-api-python-client==2.110.0
+google-auth-httplib2==0.2.0
+google-auth-oauthlib==1.2.0
+google-auth==2.25.2
