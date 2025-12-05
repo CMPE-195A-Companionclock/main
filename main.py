@@ -1,6 +1,7 @@
 import argparse
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -203,14 +204,25 @@ def run_touch_ui(fullscreen: bool = True):
         path = _ensure_alarm_sound()
         if not path:
             return False
+        # Windows fallback: winsound
+        if sys.platform.startswith("win"):
+            try:
+                import winsound
+
+                winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                return True
+            except Exception as e:
+                print("Alarm sound playback failed (winsound):", e)
+        # POSIX: try aplay
         try:
             res = subprocess.run(
                 ["aplay", "-q", path], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
-            return res.returncode == 0
+            if res.returncode == 0:
+                return True
         except Exception as e:
-            print("Alarm sound playback failed:", e)
-            return False
+            print("Alarm sound playback failed (aplay):", e)
+        return False
 
     def render():
         nonlocal weather_data
