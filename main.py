@@ -4,6 +4,9 @@ import time
 from typing import Optional
 import requests
 
+from PIapp.calendar_service import get_calendar_service
+from PIapp.calendar_ui import CalendarPage
+
 
 def run_clock(windowed: bool = False):
     from PIapp.clock import run
@@ -21,9 +24,9 @@ def run_server():
     app.run(host="0.0.0.0", port=5000, threaded=True)
 
 
-def show_calendar():
-    from PIapp.calendarPage import main as cal_main
-    cal_main()
+#def show_calendar():
+    #from PIapp.calendarPage import main as cal_main
+    #cal_main()
 
 
 def main(argv=None):
@@ -51,7 +54,10 @@ def main(argv=None):
     elif args.cmd == "server":
         run_server()
     elif args.cmd == "calendar":
-        show_calendar()
+        service = get_calendar_service()
+        events = service.get_upcoming_events()
+        for event in events:
+            print(f"{event['date']} {event['start_time']} - {event['summary']}")
     elif args.cmd == "ui":
         return run_touch_ui(fullscreen=not args.windowed)
     else:
