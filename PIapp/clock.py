@@ -76,7 +76,7 @@ def drawClock(dayName, today, currentTime, currentSecond):
     base = _BG_CACHE["img"].copy()
     base.paste(_HHMM_CACHE["img"], (50, 230))
     sec_tile = _build_sec_tile(currentSecond)
-    base.paste(sec_tile, (900, 410))
+    base.paste(sec_tile, (920, 410))
     return ImageTk.PhotoImage(base)
 
 
