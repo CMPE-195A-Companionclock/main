@@ -4,27 +4,36 @@ import re
 def _parse_alarm_request(text: str):
     t = text.lower()
     m = re.search(
-        r"(?:set\s+(?:an\s+)?alarm(?:\s*(?:for|at|to))?|wake\s+me(?:\s+up)?(?:\s*(?:for|at|to))?)"
-        r"\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b",
+        r"(?:set\s+(?:an\s+)?alarm(?:\s*(?:for|at|to))?|"
+        r"wake\s+me(?:\s+up)?(?:\s*(?:for|at|to))?)"
+        r"\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?\b",
         t,
     )
+    if not m:
+        m = re.search(
+            r"(?:\b(?:at|for)\s+)?"
+            r"(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?\b",
+            t,
+        )
     if not m:
         return None
     
     hour = int(m.group(1))
     minute = int(m.group(2) or "0")
-    meridiem = m.group(3)
+    meridiem_raw = m.group(3)
 
     if hour > 23 or minute > 59:
         return None
 
+    meridiem = None
     if meridiem:
-        meridiem = meridiem.lower()
+        meridiem = re.sub(r"[^a-z]", "", meridiem_raw.lower())
+
+    if meridiem in ("am", "pm"):
         if meridiem == "am":
             hour_24 = 0 if hour == 12 else hour
-        else:  # "pm"
+        else:  # pm
             hour_24 = 12 if hour == 12 else hour + 12
-
         return {
             "intent": "set_alarm",
             "alarm_time": f"{hour_24:02d}:{minute:02d}",
