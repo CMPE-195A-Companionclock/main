@@ -526,7 +526,7 @@ def run_touch_ui(fullscreen: bool = True):
                 cur = alarms["items"][alarms["i"]]
                 layout = alarm_layout(cur["hour"], cur["minute"], len(alarms["items"]), alarms["i"])
                 if inside(layout.get("list_add", (0, 0, 0, 0))):
-                    new_item = {"hour": cur.get("hour", 7), "minute": cur.get("minute", 0), "enabled": cur.get("enabled", False)}
+                    new_item = {"hour": cur.get("hour", 7), "minute": cur.get("minute", 0), "enabled": False}
                     alarms["items"].insert(alarms["i"] + 1, new_item)
                     alarms["i"] += 1
                     render()
