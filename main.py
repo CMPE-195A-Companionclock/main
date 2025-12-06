@@ -321,6 +321,7 @@ def run_touch_ui(fullscreen: bool = True):
 
                     with open(VOICE_CMD_PATH, "r", encoding="utf-8") as f:
                         payload = json.load(f)
+                    print("[ui] VOICE_CMD payload:", payload, flush=True)
                     voice_cmd_state["last_mtime"] = mt
 
                     cmds = payload if isinstance(payload, list) else [payload]
