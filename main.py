@@ -161,6 +161,67 @@ def run_touch_ui(fullscreen: bool = True):
         "calendar": {"img": None, "ym": None},
         "alarm": {"img": None, "sig": None},
     }
+    alarm_sound = {"path": None}
+
+    def _ensure_alarm_sound() -> Optional[str]:
+        """Create a small WAV beep for the alarm if it doesn't exist."""
+        path = os.path.join(LOCAL_TMP, "alarm_beep.wav")
+        if alarm_sound.get("path") and os.path.exists(alarm_sound["path"]):
+            return alarm_sound["path"]
+        try:
+            os.makedirs(LOCAL_TMP, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            if not os.path.exists(path):
+                import math
+                import wave
+                import array
+
+                sample_rate = 16000
+                duration = 1.0  # seconds
+                freq = 880.0
+                volume = 0.35
+                samples = array.array("h")
+                total = int(sample_rate * duration)
+                for i in range(total):
+                    val = int(volume * 32767 * math.sin(2 * math.pi * freq * (i / sample_rate)))
+                    samples.append(val)
+                with wave.open(path, "w") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(sample_rate)
+                    wf.writeframes(samples.tobytes())
+            alarm_sound["path"] = path
+            return path
+        except Exception as e:
+            print("Alarm sound generation failed:", e)
+            return None
+
+    def play_alarm_sound() -> bool:
+        """Play the generated alarm beep; returns True on success."""
+        path = _ensure_alarm_sound()
+        if not path:
+            return False
+        # Windows fallback: winsound
+        if sys.platform.startswith("win"):
+            try:
+                import winsound
+
+                winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                return True
+            except Exception as e:
+                print("Alarm sound playback failed (winsound):", e)
+        # POSIX: try aplay
+        try:
+            res = subprocess.run(
+                ["aplay", "-q", path], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            if res.returncode == 0:
+                return True
+        except Exception as e:
+            print("Alarm sound playback failed (aplay):", e)
+        return False
 
     alarm_sound = {"path": None}
 
@@ -552,6 +613,10 @@ def run_touch_ui(fullscreen: bool = True):
                         alarms["i"] = idx
                         render()
                         return
+                if inside(layout.get("toggle", (0, 0, 0, 0))):
+                    cur["enabled"] = not cur.get("enabled", False)
+                    render()
+                    return
                 if inside(layout.get("am_btn", (0, 0, 0, 0))):
                     cur["hour"] = cur["hour"] % 12
                 elif inside(layout.get("pm_btn", (0, 0, 0, 0))):
