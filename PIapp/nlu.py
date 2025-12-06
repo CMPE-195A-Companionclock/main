@@ -4,7 +4,7 @@ import re
 def _parse_alarm_request(text: str):
     t = text.lower()
     m = re.search(
-        r"(?:set\s+(?:an\s+)?alarm(?:\s*(?:for|at))?|wake\s+me(?:\s+up)?(?:\s*(?:for|at))?)"
+        r"(?:set\s+(?:an\s+)?alarm(?:\s*(?:for|at|to))?|wake\s+me(?:\s+up)?(?:\s*(?:for|at|to))?)"
         r"\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b",
         t,
     )
