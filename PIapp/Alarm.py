@@ -31,6 +31,7 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
       - 'h_ones_plus', 'h_ones_minus'  (hours tens removed)
       - 'm_tens_plus', 'm_tens_minus', 'm_ones_plus', 'm_ones_minus'
       - 'ampm' (AM/PM toggle)
+      - 'toggle' (enable/disable)
       - 'back'
     """
     # Measure overall time text and per-digit widths
@@ -97,6 +98,11 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
     layout['am_btn'] = (ampm_x1, top_y + (total_h - ampm_h)//2, ampm_x1 + ampm_w, top_y + (total_h + ampm_h)//2)
     layout['pm_btn'] = (ampm_x1 + ampm_w + 10, top_y + (total_h - ampm_h)//2,
                         ampm_x1 + 2*ampm_w + 10, top_y + (total_h + ampm_h)//2)
+    # Toggle switch (enable/disable) placed under title, right-aligned in content area
+    toggle_w, toggle_h = 170, 60
+    toggle_x1 = content_x0 + content_w - toggle_w - 12
+    toggle_y1 = 26
+    layout['toggle'] = (toggle_x1, toggle_y1, toggle_x1 + toggle_w, toggle_y1 + toggle_h)
 
     # Bottom buttons in list area: split width into two large buttons (trash and add)
     list_pad = 16
@@ -140,10 +146,12 @@ def _draw_button(drw: ImageDraw.ImageDraw, rect, label: str, font):
     try:
         l, t, r, b = drw.textbbox((0, 0), label, font=font)
         tw, th = r - l, b - t
+        tx = x1 + (x2 - x1 - tw) // 2 - l
+        ty = y1 + (y2 - y1 - th) // 2 - t
     except Exception:
         tw, th = drw.textsize(label, font=font)
-    tx = x1 + (x2 - x1 - tw) // 2
-    ty = y1 + (y2 - y1 - th) // 2
+        tx = x1 + (x2 - x1 - tw) // 2
+        ty = y1 + (y2 - y1 - th) // 2
     drw.text((tx, ty), label, font=font, fill=_COLOR)
 
 
@@ -182,6 +190,7 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
     content_x0 = LIST_W + 20
     content_w = WINDOW_W - content_x0 - 20
     drw.text((content_x0 + (content_w - tw) // 2, 20), title, font=title_f, fill=_COLOR)
+    layout = get_layout(hour, minute, total=total, selected=selected)
 
     # Display in 12-hour format with AM/PM
     hour12 = (hour % 12) or 12
@@ -196,7 +205,6 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
     drw.text((cx, cy), time_txt, font=time_f, fill=_COLOR)
 
     # Draw +/- above/below the hour and minute numbers
-    layout = get_layout(hour, minute, total=total, selected=selected)
     small_f = _font(22)
     big_f = _font(72)
     # +/-: frameless and large per digit
@@ -211,6 +219,13 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
     # AM / PM buttons
     _draw_button(drw, layout['am_btn'], "AM", small_f)
     _draw_button(drw, layout['pm_btn'], "PM", small_f)
+    # Enable/Disable simple rectangle toggle
+    def _draw_toggle(rect, on: bool):
+        x1, y1, x2, y2 = rect
+        drw.rectangle([x1, y1, x2, y2], outline=_COLOR, width=2, fill=None)
+        lbl = "ON" if on else "OFF"
+        _draw_text_centered(drw, (x1, y1, x2, y2), lbl, _font(22))
+    _draw_toggle(layout['toggle'], enabled)
 
     # No Back button (use swipe down)
 
@@ -237,7 +252,7 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
             h12 = (a.get('hour', 0) % 12) or 12
             m = a.get('minute', 0)
             ampm = 'PM' if a.get('hour', 0) >= 12 else 'AM'
-            label = f"{h12:02d}:{m:02d} {ampm}"
+            label = f"{h12:02d}:{m:02d} {ampm}  {'ON' if a.get('enabled') else 'OFF'}"
             # draw checkbox
             cb = layout.get(f'list_check_{i}')
             if cb:
