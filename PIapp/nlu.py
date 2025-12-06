@@ -6,13 +6,15 @@ def _parse_alarm_request(text: str):
     m = re.search(
         r"(?:set\s+(?:an\s+)?alarm(?:\s*(?:for|at|to))?|"
         r"wake\s+me(?:\s+up)?(?:\s*(?:for|at|to))?)"
-        r"\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?\b",
+        r"\s+(\d{1,2})(?::(\d{2}))?\s*"
+        r"(a\.?m\.?|p\.?m\.?|am|pm)?(?=$|\s|[?.!,])",
         t,
     )
     if not m:
         m = re.search(
             r"(?:\b(?:at|for)\s+)?"
-            r"(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?|am|pm)?\b",
+            r"(\d{1,2})(?::(\d{2}))?\s*"
+            r"(a\.?m\.?|p\.?m\.?|am|pm)?(?=$|\s|[?.!,])",
             t,
         )
     if not m:
@@ -26,8 +28,8 @@ def _parse_alarm_request(text: str):
         return None
 
     meridiem = None
-    if meridiem:
-        meridiem = re.sub(r"[^a-z]", "", meridiem_raw.lower())
+    if meridiem_raw:
+        meridiem = re.sub(r"[^a-z]", "", meridiem_raw.lower())  # e.g. "p.m." -> "pm"
 
     if meridiem in ("am", "pm"):
         if meridiem == "am":
