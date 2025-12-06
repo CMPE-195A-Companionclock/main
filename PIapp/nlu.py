@@ -3,35 +3,32 @@ import re
 
 def _parse_alarm_request(text: str):
     t = text.lower()
+
+    t = re.sub(r"\b(a\.m\.?|a\. m\.?)\b", "am", t)
+    t = re.sub(r"\b(p\.m\.?|p\. m\.?)\b", "pm", t)
+
     m = re.search(
-        r"(?:set\s+(?:an\s+)?alarm(?:\s*(?:for|at|to))?|"
-        r"wake\s+me(?:\s+up)?(?:\s*(?:for|at|to))?)"
-        r"\s+(\d{1,2})(?::(\d{2}))?\s*"
-        r"(a\.?m\.?|p\.?m\.?|am|pm)?(?=$|\s|[?.!,])",
+        r"(?:set\s+(?:an\s+)?alarm(?:\s*(?:for|at|to))?"
+        r"|wake\s+me(?:\s+up)?(?:\s*(?:for|at|to))?)"
+        r"\s+(\d{1,2})"              # hour
+        r"(?::(\d{2})|\s+(\d{1,2}))?" # :mm OR space mm (both optional)
+        r"\s*(am|pm)?\b",            # optional am/pm
         t,
     )
-    if not m:
-        m = re.search(
-            r"(?:\b(?:at|for)\s+)?"
-            r"(\d{1,2})(?::(\d{2}))?\s*"
-            r"(a\.?m\.?|p\.?m\.?|am|pm)?(?=$|\s|[?.!,])",
-            t,
-        )
+    
     if not m:
         return None
     
     hour = int(m.group(1))
-    minute = int(m.group(2) or "0")
-    meridiem_raw = m.group(3)
+    minute_str = m.group(2) or m.group(3) or "0"
+    minute = int(minute_str)
+    meridiem = m.group(3)
 
     if hour > 23 or minute > 59:
         return None
 
-    meridiem = None
-    if meridiem_raw:
-        meridiem = re.sub(r"[^a-z]", "", meridiem_raw.lower())  # e.g. "p.m." -> "pm"
-
-    if meridiem in ("am", "pm"):
+    if meridiem:
+        meridiem = meridiem.lower()
         if meridiem == "am":
             hour_24 = 0 if hour == 12 else hour
         else:  # pm
