@@ -320,7 +320,8 @@ def transcribe():
                 orig = origin or HOME_ADDRESS or "home"
                 plan = plan_alarm(arrival, dest, prep_m, origin=orig)
                 nlu["alarm_proposal"] = plan
-
+        print("[transcribe] text:", repr(text))
+        print("[transcribe] nlu:", nlu)
         return jsonify({
             "text": text,
             "nlu": nlu,
