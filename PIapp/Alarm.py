@@ -4,6 +4,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageTk
 WINDOW_W = 1024
 WINDOW_H = 600
 LIST_W = 260  # left sidebar width for alarm list
+TIME_FONT_SIZE = 120
+TIME_OFFSET_Y = -70  # lift the entire alarm block further upward
+BTN_SIZE = 56
 
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 _FONT_PATH = os.path.join(_BASE_DIR, "font", "CaviarDreams_Bold.ttf")
@@ -34,7 +37,7 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
       - 'back'
     """
     # Measure overall time text and per-digit widths
-    time_f = _font(150)
+    time_f = _font(TIME_FONT_SIZE)
     hour12 = (hour % 12) or 12
     time_txt = f"{hour12:02d}:{minute:02d}"
     dr = ImageDraw.Draw(Image.new('RGBA', (1, 1)))
@@ -58,7 +61,7 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
     content_x0 = LIST_W + 20
     content_w = WINDOW_W - content_x0 - 20
     start_x = content_x0 + (content_w - total_w) // 2
-    top_y = (WINDOW_H - total_h) // 2 - 40
+    top_y = (WINDOW_H - total_h) // 2 + TIME_OFFSET_Y
     bottom_y = top_y + total_h
 
     # Compute x positions for each char
@@ -72,8 +75,8 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
 
     # Button geometry
     pad_up = 24   # move the plus a bit higher
-    pad_dn = 10
-    btn_h = 70
+    pad_dn = 8
+    btn_h = BTN_SIZE
 
     def above_rect(x, w):
         return (x, top_y - pad_up - btn_h, x + w, top_y - pad_up)
@@ -92,11 +95,13 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
     }
 
     # AM/PM buttons to the right of time (two buttons)
-    ampm_w, ampm_h = 70, 60
+    ampm_w, ampm_h = 60, 48  # smaller boxes
+    ampm_y_offset = 22       # nudge a bit lower
     ampm_x1 = start_x + total_w + 20
-    layout['am_btn'] = (ampm_x1, top_y + (total_h - ampm_h)//2, ampm_x1 + ampm_w, top_y + (total_h + ampm_h)//2)
-    layout['pm_btn'] = (ampm_x1 + ampm_w + 10, top_y + (total_h - ampm_h)//2,
-                        ampm_x1 + 2*ampm_w + 10, top_y + (total_h + ampm_h)//2)
+    base_y = top_y + (total_h - ampm_h)//2 + ampm_y_offset
+    layout['am_btn'] = (ampm_x1, base_y, ampm_x1 + ampm_w, base_y + ampm_h)
+    layout['pm_btn'] = (ampm_x1 + ampm_w + 10, base_y,
+                        ampm_x1 + 2*ampm_w + 10, base_y + ampm_h)
 
     # Bottom buttons in list area: split width into two large buttons (trash and add)
     list_pad = 16
@@ -162,14 +167,16 @@ def _draw_text_centered(drw: ImageDraw.ImageDraw, rect, label: str, font):
 from typing import Optional, List, Set
 
 def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int = 1,
-               alarms: Optional[List] = None, selected: int = 0, checked: Optional[Set] = None) -> ImageTk.PhotoImage:
+               alarms: Optional[List] = None, selected: int = 0, checked: Optional[Set] = None,
+               commute_origin: Optional[str] = None, commute_destination: Optional[str] = None,
+               prep_minutes: Optional[int] = None) -> ImageTk.PhotoImage:
     """Return an ImageTk.PhotoImage showing an alarm settings view with buttons."""
     # Solid white to align with the main clock page background
     img = Image.new("RGB", (WINDOW_W, WINDOW_H), "white")
     drw = ImageDraw.Draw(img)
 
     title_f = _font(40)
-    time_f = _font(150)
+    time_f = _font(TIME_FONT_SIZE)
     small_f = _font(22)
 
     title = "Alarm"
@@ -192,13 +199,37 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
     except Exception:
         ww, wh = drw.textsize(time_txt, font=time_f)
     cx = content_x0 + (content_w - ww) // 2
-    cy = (WINDOW_H - wh) // 2 - 40
+    cy = (WINDOW_H - wh) // 2 + TIME_OFFSET_Y
     drw.text((cx, cy), time_txt, font=time_f, fill=_COLOR)
+
+    # Commute info (if available)
+    info_y = cy + wh + 150  # raise info block a bit (still below time)
+    line_h = 44  # larger line spacing
+    info_f = _font(22)
+    origin_txt = (commute_origin or "Please set the current location").strip()
+    dest_txt = (commute_destination or "Please set the destination").strip()
+    prep_txt = f"{prep_minutes} min" if prep_minutes is not None else "Please set the preparation time"
+    # Left-align the three lines under the time
+    text_x = content_x0 + 30
+    def _draw_label_value(y, label, value):
+        # Keep all values aligned by padding past the label width
+        try:
+            l, t, r, b = drw.textbbox((0, 0), label, font=info_f)
+            lw = r - l
+        except Exception:
+            lw, _ = drw.textsize(label, font=info_f)
+        drw.text((text_x, y), label, font=info_f, fill=_COLOR)
+        msg_x = text_x + max(lw + 12, 90)
+        drw.text((msg_x, y), value, font=info_f, fill=_COLOR)
+
+    _draw_label_value(info_y, f"From:", origin_txt)
+    _draw_label_value(info_y + line_h, f"To:", dest_txt)
+    _draw_label_value(info_y + 2 * line_h, f"Prep:", prep_txt)
 
     # Draw +/- above/below the hour and minute numbers
     layout = get_layout(hour, minute, total=total, selected=selected)
-    small_f = _font(22)
-    big_f = _font(72)
+    small_f = _font(20)
+    big_f = _font(56)
     # +/-: frameless and large per digit
     _draw_text_centered(drw, layout['h_ones_plus'], "+", big_f)
     _draw_text_centered(drw, layout['h_ones_minus'], "-", big_f)

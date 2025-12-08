@@ -249,7 +249,17 @@ def run_touch_ui(fullscreen: bool = True):
         elif v == "alarm":
             cur = alarms["items"][alarms["i"]]
             sig = (
-                tuple((a.get('hour', 0), a.get('minute', 0), a.get('enabled', False)) for a in alarms["items"]),
+                tuple(
+                    (
+                        a.get("hour", 0),
+                        a.get("minute", 0),
+                        a.get("enabled", False),
+                        a.get("origin"),
+                        a.get("destination"),
+                        a.get("prep_minutes"),
+                    )
+                    for a in alarms["items"]
+                ),
                 alarms["i"],
                 tuple(sorted(list(alarms["checked"]))),
             )
@@ -263,6 +273,9 @@ def run_touch_ui(fullscreen: bool = True):
                     alarms=alarms["items"],
                     selected=alarms["i"],
                     checked=alarms["checked"],
+                    commute_origin=cur.get("origin"),
+                    commute_destination=cur.get("destination"),
+                    prep_minutes=cur.get("prep_minutes"),
                 )
                 cache["alarm"]["img"], cache["alarm"]["sig"] = tkimg, sig
             else:
@@ -370,6 +383,10 @@ def run_touch_ui(fullscreen: bool = True):
                                             "minute": m,
                                             "enabled": True,
                                             "destination": payload.get("destination"),
+                                            "origin": payload.get("origin"),
+                                            "prep_minutes": payload.get("prep_minutes"),
+                                            "arrival_time": payload.get("arrival_time"),
+                                            "leave_time": payload.get("leave_time"),
                                         })
                                         alarms["i"] = len(alarms["items"]) - 1
                                     mode["view"] = "alarm"

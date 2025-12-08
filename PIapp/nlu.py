@@ -22,7 +22,7 @@ def _parse_alarm_request(text: str):
     hour = int(m.group(1))
     minute_str = m.group(2) or m.group(3) or "0"
     minute = int(minute_str)
-    meridiem = m.group(3)
+    meridiem = m.group(4)
 
     if hour > 23 or minute > 59:
         return None
