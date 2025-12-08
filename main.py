@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -150,6 +151,9 @@ def run_touch_ui(fullscreen: bool = True):
     weather_data: Optional[dict] = None
     last_fetch = 0.0
     alarms = {"items": [{"hour": 7, "minute": 0, "enabled": False}], "i": 0, "checked": set()}
+    loaded = _load_alarms()
+    if loaded:
+        alarms["items"] = loaded
     RANG_RECENT = set()
     _last_date = {"d": time.strftime("%Y-%m-%d")}
 
@@ -161,6 +165,104 @@ def run_touch_ui(fullscreen: bool = True):
         "calendar": {"img": None, "ym": None},
         "alarm": {"img": None, "sig": None},
     }
+    alarm_sound = {"path": None}
+    ALARM_STORE = os.path.join(LOCAL_TMP, "alarms.json")
+
+    def _load_alarms():
+        try:
+            if os.path.exists(ALARM_STORE):
+                with open(ALARM_STORE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list) and data:
+                    cleaned = []
+                    for a in data:
+                        try:
+                            cleaned.append(
+                                {
+                                    "hour": int(a.get("hour", 0)),
+                                    "minute": int(a.get("minute", 0)),
+                                    "enabled": bool(a.get("enabled", False)),
+                                }
+                            )
+                        except Exception:
+                            continue
+                    if cleaned:
+                        return cleaned
+        except Exception as e:
+            print("Alarm load failed:", e)
+        return None
+
+    def _save_alarms():
+        try:
+            os.makedirs(os.path.dirname(ALARM_STORE), exist_ok=True)
+            tmp = ALARM_STORE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(alarms["items"], f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, ALARM_STORE)
+        except Exception as e:
+            print("Alarm save failed:", e)
+
+    def _ensure_alarm_sound() -> Optional[str]:
+        """Create a small WAV beep for the alarm if it doesn't exist."""
+        path = os.path.join(LOCAL_TMP, "alarm_beep.wav")
+        if alarm_sound.get("path") and os.path.exists(alarm_sound["path"]):
+            return alarm_sound["path"]
+        try:
+            os.makedirs(LOCAL_TMP, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            if not os.path.exists(path):
+                import math
+                import wave
+                import array
+
+                sample_rate = 16000
+                duration = 1.0  # seconds
+                freq = 880.0
+                volume = 0.35
+                samples = array.array("h")
+                total = int(sample_rate * duration)
+                for i in range(total):
+                    val = int(volume * 32767 * math.sin(2 * math.pi * freq * (i / sample_rate)))
+                    samples.append(val)
+                with wave.open(path, "w") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(sample_rate)
+                    wf.writeframes(samples.tobytes())
+            alarm_sound["path"] = path
+            return path
+        except Exception as e:
+            print("Alarm sound generation failed:", e)
+            return None
+
+    def play_alarm_sound() -> bool:
+        """Play the generated alarm beep; returns True on success."""
+        path = _ensure_alarm_sound()
+        if not path:
+            return False
+        # Windows fallback: winsound
+        if sys.platform.startswith("win"):
+            try:
+                import winsound
+
+                winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                return True
+            except Exception as e:
+                print("Alarm sound playback failed (winsound):", e)
+        # POSIX: try aplay
+        try:
+            res = subprocess.run(
+                ["aplay", "-q", path], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            if res.returncode == 0:
+                return True
+        except Exception as e:
+            print("Alarm sound playback failed (aplay):", e)
+        return False
 
     alarm_sound = {"path": None}
 
@@ -357,6 +459,7 @@ def run_touch_ui(fullscreen: bool = True):
                                     alarms["items"].append({"hour": h, "minute": m, "enabled": True})
                                     alarms["i"] = len(alarms["items"]) - 1
                                     mode["view"] = "alarm"
+                                    _save_alarms()
                             except Exception:
                                 pass
 
@@ -389,6 +492,7 @@ def run_touch_ui(fullscreen: bool = True):
                                             "leave_time": payload.get("leave_time"),
                                         })
                                         alarms["i"] = len(alarms["items"]) - 1
+                                        _save_alarms()
                                     mode["view"] = "alarm"
                                 except Exception:
                                     pass
@@ -546,6 +650,7 @@ def run_touch_ui(fullscreen: bool = True):
                     new_item = {"hour": cur.get("hour", 7), "minute": cur.get("minute", 0), "enabled": False}
                     alarms["items"].insert(alarms["i"] + 1, new_item)
                     alarms["i"] += 1
+                    _save_alarms()
                     render()
                     return
                 if inside(layout.get("list_trash", (0, 0, 0, 0))):
@@ -556,6 +661,7 @@ def run_touch_ui(fullscreen: bool = True):
                         alarms["items"] = remaining
                         alarms["i"] = min(alarms["i"], len(alarms["items"]) - 1)
                         alarms["checked"].clear()
+                        _save_alarms()
                     render()
                     return
                 for idx in range(len(alarms["items"])):
@@ -570,6 +676,11 @@ def run_touch_ui(fullscreen: bool = True):
                         alarms["i"] = idx
                         render()
                         return
+                if inside(layout.get("toggle", (0, 0, 0, 0))):
+                    cur["enabled"] = not cur.get("enabled", False)
+                    _save_alarms()
+                    render()
+                    return
                 if inside(layout.get("am_btn", (0, 0, 0, 0))):
                     cur["hour"] = cur["hour"] % 12
                 elif inside(layout.get("pm_btn", (0, 0, 0, 0))):
@@ -601,6 +712,7 @@ def run_touch_ui(fullscreen: bool = True):
                     if o == 9:
                         t = (cur["minute"] // 10 - 1) % 6
                         cur["minute"] = t * 10 + o
+                _save_alarms()
                 render()
                 return
 
