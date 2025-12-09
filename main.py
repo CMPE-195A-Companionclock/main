@@ -143,13 +143,57 @@ def run_touch_ui(fullscreen: bool = True):
     try:
         speak("Companion Clock is ready.")
     except Exception as e:
-        print("TTS startup error:", e)
+        try:
+            msg = str(e)
+        except Exception:
+            msg = repr(e)
+        safe_msg = msg.encode("ascii", "backslashreplace").decode("ascii")
+        print("TTS startup error:", safe_msg)
 
     # State
     mode = {"view": "clock"}  # calendar | weather | clock | alarm
     api_key: Optional[str] = os.getenv("WEATHERAPI_KEY")
     weather_data: Optional[dict] = None
     last_fetch = 0.0
+    ALARM_STORE = os.path.join(LOCAL_TMP, "alarms.json")
+    alarm_sound = {"path": None}
+
+    def _load_alarms():
+        try:
+            if os.path.exists(ALARM_STORE):
+                with open(ALARM_STORE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list) and data:
+                    cleaned = []
+                    for a in data:
+                        try:
+                            cleaned.append(
+                                {
+                                    "hour": int(a.get("hour", 0)),
+                                    "minute": int(a.get("minute", 0)),
+                                    "enabled": bool(a.get("enabled", False)),
+                                }
+                            )
+                        except Exception:
+                            continue
+                    if cleaned:
+                        return cleaned
+        except Exception as e:
+            print("Alarm load failed:", e)
+        return None
+
+    def _save_alarms():
+        try:
+            os.makedirs(os.path.dirname(ALARM_STORE), exist_ok=True)
+            tmp = ALARM_STORE + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(alarms["items"], f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, ALARM_STORE)
+        except Exception as e:
+            print("Alarm save failed:", e)
+
     alarms = {"items": [{"hour": 7, "minute": 0, "enabled": False}], "i": 0, "checked": set()}
     loaded = _load_alarms()
     if loaded:
@@ -165,8 +209,6 @@ def run_touch_ui(fullscreen: bool = True):
         "calendar": {"img": None, "ym": None},
         "alarm": {"img": None, "sig": None},
     }
-    alarm_sound = {"path": None}
-    ALARM_STORE = os.path.join(LOCAL_TMP, "alarms.json")
 
     def _load_alarms():
         try:
@@ -681,11 +723,16 @@ def run_touch_ui(fullscreen: bool = True):
                     _save_alarms()
                     render()
                     return
-                if inside(layout.get("am_btn", (0, 0, 0, 0))):
-                    cur["hour"] = cur["hour"] % 12
-                elif inside(layout.get("pm_btn", (0, 0, 0, 0))):
-                    h12 = (cur["hour"] % 12) or 12
-                    cur["hour"] = 12 if h12 == 12 else h12 + 12
+                if inside(layout.get("delete_btn", (0, 0, 0, 0))) and len(alarms["items"]) > 1:
+                    # Delete current alarm; keep at least one entry
+                    alarms["items"].pop(alarms["i"])
+                    alarms["i"] = min(alarms["i"], len(alarms["items"]) - 1)
+                    _save_alarms()
+                    render()
+                    return
+                if inside(layout.get("ampm_btn", (0, 0, 0, 0))):
+                    # Toggle AM/PM while keeping hour within 0-23
+                    cur["hour"] = (cur.get("hour", 0) + 12) % 24
                 elif inside(layout.get("h_ones_plus", (0, 0, 0, 0))) or inside(layout.get("h_ones_minus", (0, 0, 0, 0))):
                     ampm_pm = cur["hour"] >= 12
                     h12 = (cur["hour"] % 12) or 12

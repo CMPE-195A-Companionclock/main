@@ -33,7 +33,7 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
     Keys include per-digit controls:
       - 'h_ones_plus', 'h_ones_minus'  (hours tens removed)
       - 'm_tens_plus', 'm_tens_minus', 'm_ones_plus', 'm_ones_minus'
-      - 'ampm' (AM/PM toggle)
+      - 'ampm_btn' (AM/PM toggle)
       - 'toggle' (enable/disable)
       - 'back'
     """
@@ -95,14 +95,22 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
         'm_ones_minus': below_rect(m_ones_x, m_ones_w),
     }
 
-    # AM/PM buttons to the right of time (two buttons)
-    ampm_w, ampm_h = 60, 48  # smaller boxes
+    # AM/PM toggle to the right of time (single underline button)
+    ampm_w, ampm_h = 140, 48
     ampm_y_offset = 22       # nudge a bit lower
-    ampm_x1 = start_x + total_w + 20
-    base_y = top_y + (total_h - ampm_h)//2 + ampm_y_offset
-    layout['am_btn'] = (ampm_x1, base_y, ampm_x1 + ampm_w, base_y + ampm_h)
-    layout['pm_btn'] = (ampm_x1 + ampm_w + 10, base_y,
-                        ampm_x1 + 2*ampm_w + 10, base_y + ampm_h)
+    ampm_x1 = start_x + total_w  # shift left a bit (was +20)
+    base_y = top_y + (total_h - ampm_h)//2 + ampm_y_offset - 8  # lift slightly
+    layout['ampm_btn'] = (ampm_x1, base_y, ampm_x1 + ampm_w, base_y + ampm_h)
+    # Enable/Disable toggle above, near the title area (AM/PM stays in place)
+    toggle_w, toggle_h = ampm_w, ampm_h  # align width/height with AM/PM for consistent underline
+    toggle_x1 = ampm_x1 + 12  # slight right offset
+    toggle_y = 20  # roughly align with title height
+    layout['toggle'] = (toggle_x1, toggle_y, toggle_x1 + toggle_w, toggle_y + toggle_h)
+    # Delete button to the left side (mirroring toggle height/width)
+    delete_w, delete_h = toggle_w, toggle_h
+    delete_x1 = LIST_W + 20  # near left side of content area
+    delete_y = toggle_y
+    layout['delete_btn'] = (delete_x1, delete_y, delete_x1 + delete_w, delete_y + delete_h)
 
     # Bottom buttons in list area: split width into two large buttons (trash and add)
     list_pad = 16
@@ -165,6 +173,31 @@ def _draw_text_centered(drw: ImageDraw.ImageDraw, rect, label: str, font):
     tx = x1 + (x2 - x1 - tw) // 2
     ty = y1 + (y2 - y1 - th) // 2
     drw.text((tx, ty), label, font=font, fill=_COLOR)
+
+
+def _draw_underlined(drw: ImageDraw.ImageDraw, rect, label: str, font, underline_text: str = None, pad_v: int = 28):
+    """Draw text centered with a bottom underline sized to the given text (defaults to label)."""
+    x1, y1, x2, y2 = rect
+    try:
+        l, t, r, b = drw.textbbox((0, 0), label, font=font)
+        tw, th = r - l, b - t
+    except Exception:
+        tw, th = drw.textsize(label, font=font)
+    tx = x1 + (x2 - x1 - tw) // 2
+    ty = y1 + (y2 - y1 - th) // 2
+    drw.text((tx, ty), label, font=font, fill=_COLOR)
+    # Underline width based on supplied text (e.g., PM, OFF)
+    u_txt = underline_text or label
+    try:
+        l2, t2, r2, b2 = drw.textbbox((0, 0), u_txt, font=font)
+        u_w = r2 - l2
+    except Exception:
+        u_w, _ = drw.textsize(u_txt, font=font)
+    u_w = min(u_w, x2 - x1)  # clamp to button width
+    u_x1 = x1 + (x2 - x1 - u_w) // 2
+    u_x2 = u_x1 + u_w
+    underline_y = y2 - pad_v
+    drw.line([(u_x1, underline_y), (u_x2, underline_y)], fill=_COLOR, width=3)
 
 
 from typing import Optional, List, Set
@@ -232,7 +265,7 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
 
     # Draw +/- above/below the hour and minute numbers
     layout = get_layout(hour, minute, total=total, selected=selected)
-    small_f = _font(20)
+    small_f = _font(30)  # 1.5x larger for AM/PM
     big_f = _font(56)
     # +/-: frameless and large per digit
     _draw_text_centered(drw, layout['h_ones_plus'], "+", big_f)
@@ -242,17 +275,21 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
     _draw_text_centered(drw, layout['m_ones_plus'], "+", big_f)
     _draw_text_centered(drw, layout['m_ones_minus'], "-", big_f)
 
-    # AM/PM toggle
-    # AM / PM buttons
-    _draw_button(drw, layout['am_btn'], "AM", small_f)
-    _draw_button(drw, layout['pm_btn'], "PM", small_f)
-    # Enable/Disable simple rectangle toggle
+    # AM/PM toggle (single underline button showing current state)
+    def _draw_ampm(rect, hour24: int):
+        lbl = "AM" if hour24 < 12 else "PM"
+        # Drop underline slightly to avoid overlap (half of previous move)
+        _draw_underlined(drw, rect, lbl, _font(int(30 * 1.5)), underline_text="PM", pad_v=-10)
+    _draw_ampm(layout['ampm_btn'], hour)
+    # Enable/Disable underline toggle
     def _draw_toggle(rect, on: bool):
-        x1, y1, x2, y2 = rect
-        drw.rectangle([x1, y1, x2, y2], outline=_COLOR, width=2, fill=None)
         lbl = "ON" if on else "OFF"
-        _draw_text_centered(drw, (x1, y1, x2, y2), lbl, _font(22))
+        # pad_v fixed to 0 per request
+        _draw_underlined(drw, rect, lbl, _font(33), underline_text="OFF", pad_v=0)
     _draw_toggle(layout['toggle'], enabled)
+    # Delete button (left of title area, same style/size as toggle) if more than one alarm
+    if total > 1:
+        _draw_underlined(drw, layout['delete_btn'], "DELETE", _font(33), underline_text="DELETE", pad_v=0)
 
     # No Back button (use swipe down)
 
