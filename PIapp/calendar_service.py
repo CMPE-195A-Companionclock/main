@@ -278,13 +278,23 @@ def get_calendar_service(credentials_path: Optional[str] = None,
     Returns:
         GoogleCalendarService instance
     """
-    if credentials_path is None:
-        credentials_path = os.getenv('GOOGLE_CREDENTIALS_PATH', 'credentials.json')
-    if token_path is None:
-        token_path = os.getenv('GOOGLE_TOKEN_PATH', 'token.pickle')
-    
-    return GoogleCalendarService(credentials_path, token_path)
+    base_dir = Path(__file__).resolve().parent
 
+    if credentials_path is None:
+        env_path = os.getenv('GOOGLE_CREDENTIALS_PATH')
+        if env_path:
+            credentials_path = env_path
+        else:
+            credentials_path = str(base_dir / "credentials.json")
+
+    if token_path is None:
+        env_token = os.getenv('GOOGLE_TOKEN_PATH')
+        if env_token:
+            token_path = env_token
+        else:
+            token_path = str(base_dir / "token.pickle")
+
+    return GoogleCalendarService(credentials_path, token_path)
 
 if __name__ == '__main__':
     # Test the calendar service
