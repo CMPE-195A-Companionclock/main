@@ -200,6 +200,7 @@ def run_touch_ui(fullscreen: bool = True):
         alarms["items"] = loaded
     RANG_RECENT = set()
     _last_date = {"d": time.strftime("%Y-%m-%d")}
+    pending_commute = {}
 
     # Voice command inbox (simple file-based IPC with voiceRecognition.py)
     voice_cmd_state = {"last_mtime": 0.0}
@@ -439,8 +440,9 @@ def run_touch_ui(fullscreen: bool = True):
     timer = {"id": None}
     weather_fetching = {"busy": False}
 
+
     def tick():
-        nonlocal last_fetch, weather_data
+        nonlocal last_fetch, weather_data, pending_commute
         now = time.time()
         today = time.strftime("%Y-%m-%d")
         if today != _last_date["d"]:
@@ -513,11 +515,19 @@ def run_touch_ui(fullscreen: bool = True):
                                 mode["view"] = goto
 
                         elif cmd == "set_commute":
+                            if pending_commute:
+                                for key in ("destination", "arrival_time", "prep_minutes", "origin"):
+                                    if key not in payload or not payload.get(key):
+                                        if key in pending_commute:
+                                            payload[key] = pending_commute[key]
                             hhmm = str(
                                 payload.get("leave_time")
                                 or payload.get("arrival_time")
                                 or ""
                             ).strip()
+                            alarm_time = cmd["leave_time"]  # or from alarm_proposal
+                            dest = cmd["destination"]
+                            speak(f"Okay, I'll wake you at {alarm_time} so you can get to {dest} on time.")
                             if hhmm:
                                 try:
                                     h, m = [int(x) for x in hhmm.split(":", 1)]
@@ -540,22 +550,37 @@ def run_touch_ui(fullscreen: bool = True):
                                         ui_refresh["dirty"] = True
                                         _save_alarms()
                                     mode["view"] = "alarm"
+                                    pending_commute.clear()
                                 except Exception:
                                     pass
+
                         elif cmd == "commute_missing":
                             missing = payload.get("missing") or []
-                            
+                            dest    = payload.get("destination")
+                            arrival = payload.get("arrival_time")
+                            prep    = payload.get("prep_minutes")
+                            origin  = payload.get("origin")
+
+                            if dest or arrival or prep is not None or origin:
+                                pending_commute.update({
+                                    k: v for k, v in {
+                                        "destination": dest,
+                                        "arrival_time": arrival,
+                                        "prep_minutes": prep,
+                                        "origin": origin,
+                                    }.items() if v not in (None, "", [])
+                                })
+
                             if speak:
-                                if "arrival_time" in missing and "destination" in missing:
-                                    speak("I can help with your commute, but I need both your arrival time and your destination. For example, say: I need to be at the airport by 7 a.m.")
-                                elif "destination" in missing:
-                                    speak("Okay. Where are you going?")
+                                missing = cmd.get("missing", [])
+                                if "destination" in missing:
+                                    speak("Where are you going?")
                                 elif "arrival_time" in missing:
                                     speak("What time do you need to arrive?")
                                 elif "prep_minutes" in missing:
-                                    speak("How many minutes do you need to get ready before leaving?")
+                                    speak("How many minutes do you need to get ready?")
                                 else:
-                                    speak("I need a little more information to plan your commute. Please say when and where you need to be.")
+                                    speak("I need a bit more information to plan your commute.")
                         elif cmd == "alarm_missing":
                             missing = payload.get("missing") or []
                             hour = payload.get("hour")
@@ -584,6 +609,11 @@ def run_touch_ui(fullscreen: bool = True):
                                         "Did you mean A M or P M? "
                                         "Please repeat the alarm with A M or P M."
                                     )
+                        elif cmd.get("intent") == "gemini_error":
+                            # make the clock honest about being unable to plan
+                            msg = "I couldn't plan your commute right now because the AI service is unavailable."
+                            print("[voice] Gemini error:", cmd.get("error"), cmd.get("message"))
+                            speak(msg) 
 
                     try:
                         os.remove(VOICE_CMD_PATH)
