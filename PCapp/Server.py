@@ -438,6 +438,29 @@ def tts():
             except: 
                 pass
 
+@app.route("/plan_alarm", methods=["POST"])
+def plan_alarm_route():
+    """
+    Recompute a commute alarm time given arrival_time, destination, and optional
+    prep_minutes and origin. This does NOT call Gemini, it just uses Maps+Weather.
+    """
+    try:
+        data = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "invalid json"}), 400
+
+    arrival = str(data.get("arrival_time") or "").strip()
+    dest    = str(data.get("destination") or "").strip()
+    prep    = data.get("prep_minutes")
+    origin  = data.get("origin") or HOME_ADDRESS or "home"
+
+    if not arrival or not dest:
+        return jsonify({"error": "arrival_time and destination required"}), 400
+
+    plan = plan_alarm(arrival, dest, prep, origin=origin)
+    return jsonify(plan)
+
+
 def _warmup_coqui():
     try:
         if TTS_ENGINE_DEFAULT == "coqui":
