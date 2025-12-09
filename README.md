@@ -75,11 +75,17 @@ Troubleshooting
 ___________________________________________________________________________________________________________________
 ## Google Calendar Integration Setup
 
+- credentials.json -> OAuth client
+- token.pickle -> stores user authentication token
+- calendar_auth_help.py -> walks you though google login
+- calendar_service.py -> runtime event retrieval
+- calendarPage.py -> draws calendar grid and events
+
 1. Get GoogleCal API credentials:
    - Visit https://console.cloud.google.com
    - Create a project and enable Google Calendar API
    - Create OAuth 2.0 credentials (Desktop app)
-   - Download as `credentials.json`
+   - Download as `credentials.json` place in PIapp/credentials.json
 
 2. Install dependencies:
 ```bash
@@ -87,9 +93,11 @@ ________________________________________________________________________________
 ```
 
 3. Authenticate:
+Run on Pi:
 ```bash
-   python3 -c "from PIapp.calendar_service import get_calendar_service; get_calendar_service()"
+   python3 calendar_auth_helper.py
 ```
+Pi will print a Google login link, copy this link and paste it in main computer. You can login normally and Pi will receive a toke
 
 ### Environment Variables
 
