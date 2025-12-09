@@ -28,6 +28,35 @@ def run_server():
     #from PIapp.calendarPage import main as cal_main
     #cal_main()
 
+def run_calendar_ui(windowed: bool = False):
+    """Open the full-screen CalendarPage UI (uses Google Calendar events)."""
+    import tkinter as tk
+
+    WINDOW_W, WINDOW_H = 1024, 600
+
+    root = tk.Tk()
+    root.title("CompanionClock – Calendar")
+
+    # Windowed vs fullscreen
+    if windowed:
+        root.geometry(f"{WINDOW_W}x{WINDOW_H}")
+    else:
+        root.attributes("-fullscreen", True)
+
+    # Background color should match CalendarPage default
+    root.configure(bg="#000000")
+
+    page = CalendarPage(root)
+    page.pack(fill=tk.BOTH, expand=True)
+
+    # Escape exits fullscreen/window
+    def close(event=None):
+        root.attributes("-fullscreen", False)
+        root.destroy()
+
+    root.bind("<Escape>", close)
+
+    root.mainloop()
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="CompanionClock launcher")
@@ -38,7 +67,9 @@ def main(argv=None):
 
     sub.add_parser("voice", help="Run voice recognition (wake word -> record -> send)")
     sub.add_parser("server", help="Run PC-side ASR server (Flask + faster-whisper)")
-    sub.add_parser("calendar", help="Print generated calendar DataFrame for the current month")
+    p_cal = sub.add_parser("calendar", help="Show Calendar UI with Google events")
+    p_cal.add_argument("--windowed", action="store_true",
+                   help="Run calendar in a window instead of fullscreen")
     p_ui = sub.add_parser("ui", help="Run touch-enabled main UI (default)")
     p_ui.add_argument("--windowed", action="store_true", help="Run windowed (not fullscreen)")
 
@@ -54,10 +85,8 @@ def main(argv=None):
     elif args.cmd == "server":
         run_server()
     elif args.cmd == "calendar":
-        service = get_calendar_service()
-        events = service.get_upcoming_events()
-        for event in events:
-            print(f"{event['date']} {event['start_time']} - {event['summary']}")
+        # Launch the Tk-based CalendarPage UI
+        return run_calendar_ui(windowed=args.windowed)
     elif args.cmd == "ui":
         return run_touch_ui(fullscreen=not args.windowed)
     else:
