@@ -209,6 +209,7 @@ def run_touch_ui(fullscreen: bool = True):
         "calendar": {"img": None, "ym": None},
         "alarm": {"img": None, "sig": None},
     }
+    ui_refresh = {"dirty": False}
 
     def _load_alarms():
         try:
@@ -433,6 +434,7 @@ def run_touch_ui(fullscreen: bool = True):
         label.config(image=tkimg)
         label.image = tkimg
         view_state["last"] = v
+        ui_refresh["dirty"] = False
 
     timer = {"id": None}
     weather_fetching = {"busy": False}
@@ -501,6 +503,7 @@ def run_touch_ui(fullscreen: bool = True):
                                     alarms["items"].append({"hour": h, "minute": m, "enabled": True})
                                     alarms["i"] = len(alarms["items"]) - 1
                                     mode["view"] = "alarm"
+                                    ui_refresh["dirty"] = True
                                     _save_alarms()
                             except Exception:
                                 pass
@@ -534,6 +537,7 @@ def run_touch_ui(fullscreen: bool = True):
                                             "leave_time": payload.get("leave_time"),
                                         })
                                         alarms["i"] = len(alarms["items"]) - 1
+                                        ui_refresh["dirty"] = True
                                         _save_alarms()
                                     mode["view"] = "alarm"
                                 except Exception:
@@ -613,7 +617,7 @@ def run_touch_ui(fullscreen: bool = True):
         except Exception:
             pass
 
-        if mode["view"] == "clock" or view_state.get("last") != mode.get("view"):
+        if mode["view"] == "clock" or view_state.get("last") != mode.get("view") or ui_refresh.get("dirty"):
             render()
         timer["id"] = root.after(1000, tick)
 
@@ -704,6 +708,7 @@ def run_touch_ui(fullscreen: bool = True):
                         alarms["i"] = min(alarms["i"], len(alarms["items"]) - 1)
                         alarms["checked"].clear()
                         _save_alarms()
+                        ui_refresh["dirty"] = True
                     render()
                     return
                 for idx in range(len(alarms["items"])):
@@ -721,6 +726,7 @@ def run_touch_ui(fullscreen: bool = True):
                 if inside(layout.get("toggle", (0, 0, 0, 0))):
                     cur["enabled"] = not cur.get("enabled", False)
                     _save_alarms()
+                    ui_refresh["dirty"] = True
                     render()
                     return
                 if inside(layout.get("delete_btn", (0, 0, 0, 0))) and len(alarms["items"]) > 1:
@@ -728,6 +734,7 @@ def run_touch_ui(fullscreen: bool = True):
                     alarms["items"].pop(alarms["i"])
                     alarms["i"] = min(alarms["i"], len(alarms["items"]) - 1)
                     _save_alarms()
+                    ui_refresh["dirty"] = True
                     render()
                     return
                 if inside(layout.get("ampm_btn", (0, 0, 0, 0))):
