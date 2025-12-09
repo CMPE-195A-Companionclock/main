@@ -1,6 +1,7 @@
 from typing import Dict
 import re
 
+
 def _parse_alarm_request(text: str):
     t = text.lower()
 
@@ -71,7 +72,14 @@ def get_intent(text: str) -> Dict:
         return alarm
     
     words = t.split()
+    smart_off = re.search(r"\b(turn off|disable|stop)\b.*\b(commute|traffic).*update", text, re.I)
+    smart_on  = re.search(r"\b(turn on|enable|start)\b.*\b(commute|traffic).*update", text, re.I)
 
+    if smart_off:
+        return {"intent": "toggle_commute_updates", "state": "off"}
+
+    if smart_on:
+        return {"intent": "toggle_commute_updates", "state": "on"}
     if any(w in words for w in ("weather", "forecast", "temperature", "rain", "sunny", "windy")):
         return {"intent": "goto", "view": "weather"}
     if any(w in words for w in ("calendar", "schedule", "appointments", "events", "month", "agenda")):
