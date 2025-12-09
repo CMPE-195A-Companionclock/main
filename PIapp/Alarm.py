@@ -313,10 +313,20 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
             else:
                 drw.rectangle([x1, y1, x2, y2], outline=_COLOR, width=1)
             a = alarms[i]
-            h12 = (a.get('hour', 0) % 12) or 12
+            h24 = a.get('hour', 0)
+            h12 = (h24 % 12) or 12
             m = a.get('minute', 0)
-            ampm = 'PM' if a.get('hour', 0) >= 12 else 'AM'
+            ampm = 'PM' if h24 >= 12 else 'AM'
             label = f"{h12:02d}:{m:02d} {ampm}  {'ON' if a.get('enabled') else 'OFF'}"
+           
+            if a.get("commute"):
+                base_h = a.get("base_hour")
+                base_m = a.get("base_minute")
+                if base_h is not None and base_m is not None and (base_h, base_m) != (h24, m):
+                    # Commute alarm that has been moved due to traffic
+                    label += "  (Commute • updated)"
+                else:
+                    label += "  (Commute)"
             # draw checkbox
             cb = layout.get(f'list_check_{i}')
             if cb:
