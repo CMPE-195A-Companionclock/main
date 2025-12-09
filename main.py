@@ -19,6 +19,12 @@ load_dotenv(BASE_DIR / ".env")
 
 VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", os.path.join(tempfile.gettempdir(), "cc_voice_cmd.json"))
 
+# === Smart commute auto-update settings ===
+SMART = {"COMMUTE_UPDATES": True}       # master on/off toggle
+COMMUTE_REPLAN_INTERVAL_MIN = 15        # how often to ask server again
+COMMUTE_UPDATE_THRESHOLD_MIN = 5        # only move alarm if change >= this many minutes
+COMMUTE_FREEZE_WINDOW_MIN = 30          # stop auto-adjusting this many minutes before alarm
+
 
 def run_clock(windowed: bool = False):
     from PIapp.clock import run
@@ -157,6 +163,8 @@ def run_touch_ui(fullscreen: bool = True):
     last_fetch = 0.0
     ALARM_STORE = os.path.join(LOCAL_TMP, "alarms.json")
     alarm_sound = {"path": None}
+    commute_last_check = {"ts": 0}
+
 
     def _load_alarms():
         try:
@@ -442,7 +450,7 @@ def run_touch_ui(fullscreen: bool = True):
 
 
     def tick():
-        nonlocal last_fetch, weather_data, pending_commute
+        nonlocal last_fetch, weather_data, pending_commute, commute_last_check
         now = time.time()
         today = time.strftime("%Y-%m-%d")
         if today != _last_date["d"]:
@@ -525,8 +533,8 @@ def run_touch_ui(fullscreen: bool = True):
                                 or payload.get("arrival_time")
                                 or ""
                             ).strip()
-                            alarm_time = cmd["leave_time"]  # or from alarm_proposal
-                            dest = cmd["destination"]
+                            alarm_time = payload["leave_time"]  # or from alarm_proposal
+                            dest = payload["destination"]
                             speak(f"Okay, I'll wake you at {alarm_time} so you can get to {dest} on time.")
                             if hhmm:
                                 try:
@@ -540,11 +548,15 @@ def run_touch_ui(fullscreen: bool = True):
                                             "hour": h,
                                             "minute": m,
                                             "enabled": True,
+                                            "commute": True,
                                             "destination": payload.get("destination"),
                                             "origin": payload.get("origin"),
                                             "prep_minutes": payload.get("prep_minutes"),
                                             "arrival_time": payload.get("arrival_time"),
                                             "leave_time": payload.get("leave_time"),
+                                            "base_hour": h,
+                                            "base_minute": m,
+                                            "last_replan_ts": 0,
                                         })
                                         alarms["i"] = len(alarms["items"]) - 1
                                         ui_refresh["dirty"] = True
@@ -609,11 +621,22 @@ def run_touch_ui(fullscreen: bool = True):
                                         "Did you mean A M or P M? "
                                         "Please repeat the alarm with A M or P M."
                                     )
+
+                        elif cmd == "toggle_commute_updates":
+                            state = payload.get("state")
+                            if state == "off":
+                                SMART["COMMUTE_UPDATES"] = False
+                                speak("Okay, I turned off automatic commute updates.")
+                            elif state == "on":
+                                SMART["COMMUTE_UPDATES"] = True
+                                speak("Okay, I turned on commute updates.")
+
                         elif cmd.get("intent") == "gemini_error":
                             # make the clock honest about being unable to plan
                             msg = "I couldn't plan your commute right now because the AI service is unavailable."
                             print("[voice] Gemini error:", cmd.get("error"), cmd.get("message"))
                             speak(msg) 
+                        
 
                     try:
                         os.remove(VOICE_CMD_PATH)
@@ -624,7 +647,91 @@ def run_touch_ui(fullscreen: bool = True):
                 voice_cmd_state["last_check"] = now
         except Exception:
             pass
+        if SMART["COMMUTE_UPDATES"]:
+            try:
+                # Only run this at most every COMMUTE_REPLAN_INTERVAL_MIN
+                if now - commute_last_check["ts"] > COMMUTE_REPLAN_INTERVAL_MIN * 60:
+                    commute_last_check["ts"] = now
 
+                    # Try to replan each enabled commute alarm
+                    for alarm in alarms["items"]:
+                        if not alarm.get("commute"):
+                            continue
+                        if not alarm.get("enabled", True):
+                            continue
+
+                        dest = alarm.get("destination")
+                        arrival = alarm.get("arrival_time")
+                        prep = alarm.get("prep_minutes")
+                        if not dest or not arrival:
+                            continue  # not enough info to replan
+
+                        # Compute minutes until current alarm
+                        try:
+                            import datetime as _dt
+                            now_dt = _dt.datetime.now()
+                            alarm_dt = now_dt.replace(
+                                hour=int(alarm["hour"]),
+                                minute=int(alarm["minute"]),
+                                second=0,
+                                microsecond=0,
+                            )
+                            # if alarm time is "for tomorrow" and already passed today, bump by a day
+                            if alarm_dt < now_dt:
+                                alarm_dt = alarm_dt + _dt.timedelta(days=1)
+                            mins_until_alarm = int((alarm_dt - now_dt).total_seconds() / 60)
+                        except Exception:
+                            continue
+
+                        # Don't keep moving the alarm around very close to wake time
+                        if mins_until_alarm <= COMMUTE_FREEZE_WINDOW_MIN:
+                            continue
+
+                        # Call server /plan_alarm with same arrival+destination
+                        try:
+                            import requests
+                            resp = requests.post(
+                                PC_SERVER.rstrip("/") + "/plan_alarm",
+                                json={
+                                    "arrival_time": arrival,
+                                    "destination": dest,
+                                    "prep_minutes": prep,
+                                },
+                                timeout=5,
+                            )
+                            data = resp.json()
+                        except Exception as e:
+                            print("[ui] commute replan failed:", e, flush=True)
+                            continue
+
+                        new_hhmm = str(data.get("alarm_time") or "").strip()
+                        if not new_hhmm or ":" not in new_hhmm:
+                            continue
+
+                        try:
+                            new_h, new_m = [int(x) for x in new_hhmm.split(":", 1)]
+                        except Exception:
+                            continue
+
+                        current_minutes = int(alarm["hour"]) * 60 + int(alarm["minute"])
+                        new_minutes = new_h * 60 + new_m
+                        delta = new_minutes - current_minutes  # negative = earlier
+
+                        # Only move alarm if we need to get up earlier by at least threshold
+                        if delta >= 0:
+                            continue  # don't auto-move later; being early is safer
+                        if abs(delta) < COMMUTE_UPDATE_THRESHOLD_MIN:
+                            continue  # tiny change, ignore
+
+                        print(
+                            f"[ui] commute alarm for {dest} adjusted from "
+                            f"{alarm['hour']:02d}:{alarm['minute']:02d} to {new_hhmm}",
+                            flush=True,
+                        )
+                        alarm["hour"] = new_h
+                        alarm["minute"] = new_m
+            except Exception as e:
+                print("[ui] commute auto-update error:", e, flush=True)
         try:
             now_h = int(time.strftime("%H"))
             now_m = int(time.strftime("%M"))
