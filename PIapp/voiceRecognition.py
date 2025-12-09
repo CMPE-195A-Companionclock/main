@@ -244,37 +244,37 @@ def send_to_server(path: str) -> str:
                 
         elif intent == "plan_commute":
             missing = nlu.get("missing") or []
+
+            dest    = nlu.get("destination")
+            arrival = nlu.get("arrival_time")
+            prep    = nlu.get("prep_minutes")
+            origin  = nlu.get("origin")
+
+            # Always pass along what Gemini already knows
+            if dest:
+                payload["destination"] = dest
+            if arrival:
+                payload["arrival_time"] = arrival
+            if prep is not None:
+                payload["prep_minutes"] = prep
+            if origin:
+                payload["origin"] = origin
+
             payload["missing"] = missing
 
             if missing:
-                # Let the UI handle asking follow-up questions
+                # Follow-up will be handled by the UI
                 payload["cmd"] = "commute_missing"
             else:
-                # We have enough to propose an alarm/leave time
                 alarm_prop = nlu.get("alarm_proposal") or {}
-                dest    = nlu.get("destination")
-                arrival = nlu.get("arrival_time")
-                origin  = nlu.get("origin")
-                prep    = nlu.get("prep_minutes")
-                leave   = (
+                leave = (
                     alarm_prop.get("alarm_time")
                     or nlu.get("latest_leave_time")
                     or nlu.get("leave_time")
                 )
-
-                if dest:
-                    payload["destination"] = dest
-                if arrival:
-                    payload["arrival_time"] = arrival
-                if origin:
-                    payload["origin"] = origin
-                if prep is not None:
-                    payload["prep_minutes"] = prep
                 if leave:
                     payload["leave_time"] = leave
-
-                if dest or arrival or leave:
-                    payload["cmd"] = "set_commute"
+                payload["cmd"] = "set_commute"
 
         elif intent == "set_commute":
             dest = nlu.get("destination")
