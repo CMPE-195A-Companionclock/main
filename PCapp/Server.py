@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash").strip()
+GEMINI_MODEL   = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite").strip()
 WEATHERAPI_KEY = os.environ.get("WEATHERAPI_KEY", "").strip()
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
 HOME_ADDRESS   = os.environ.get("HOME_ADDRESS", "").strip()
@@ -54,32 +54,46 @@ def _get_gemini():
     return _gemini_model
 
 _GEMINI_PLAN_PROMPT = """
-You extract commute planning parameters.
+You extract commute planning parameters for a smart alarm clock.
+
+User can speak in many ways, for example:
+- "I need to be at work by 8"
+- "What time should I leave for the airport?"
+- "Wake me up so I can reach San Jose State University by 9"
+- "Help me plan my commute tomorrow morning"
+- "I need to leave home at 7:30 to get to the doctor"
+
 Return STRICT JSON only with these fields:
 
-- "intent": "plan_commute" if the user is asking to plan a commute, morning, or wake time for a trip.
-  Otherwise, use "intent": "none".
+- "intent": 
+    - "plan_commute" if the user is asking to plan a commute, morning routine, wake time, or what time to leave
+      for some destination or event.
+    - "none" otherwise.
 
 If "intent" is "plan_commute", also include:
-- "arrival_time": "HH:MM" 24h string when the user clearly gave an arrival time;
-  otherwise null.
-- "destination": string with the place/address when the user clearly gave a destination;
-  otherwise null.
-- "prep_minutes": integer when the user clearly mentioned prep/get-ready time;
-  otherwise null.
-- "origin": string when the user clearly specified a non-default starting point
-  (e.g. "from the office", "from my parents' house"); otherwise null.
+- "arrival_time": "HH:MM" 24h string when the user clearly gave an arrival or arrival deadline time 
+  (e.g. "by 9", "at 8:30"); otherwise null.
+- "destination": a short string with the place when the user clearly gave a destination 
+  (e.g. "San Jose State University", "SFO airport", "my office"); otherwise null.
+- "prep_minutes": integer get-ready time when the user clearly mentioned it 
+  (e.g. "I need 30 minutes to get ready"); otherwise null.
+- "origin": string when the user clearly specified a non-default starting point 
+  (e.g. "from my parents' house", "from the hotel"); otherwise null.
 
 Additionally include:
 - "missing": an array listing which of ["arrival_time", "destination", "prep_minutes", "origin"]
-  are required but missing or ambiguous. For example:
-  ["destination"], ["arrival_time", "destination"], or [] if nothing important is missing.
+  are required but missing or ambiguous for a safe plan.
 
-When something is ambiguous like "the airport", "the store", or "this morning"
-and you cannot confidently resolve it to a concrete value, treat the field as null
-and add it to "missing" instead of guessing.
+Rules:
+- If the user mentions an arrival time AND a destination, assume they want commute planning
+  even if they never say the word "plan" or "wake".
+- When something is ambiguous like "the store", "the office", or "this morning",
+  and you cannot confidently resolve it to a concrete value, treat the field as null
+  and add it to "missing" instead of guessing.
+- Do not invent specific times or places the user did not imply.
 
-Only output JSON. User said: {text}
+Only output JSON.
+User said: {text}
 """
 
 def gemini_nlu(text: str) -> Optional[dict]:
@@ -91,14 +105,20 @@ def gemini_nlu(text: str) -> Optional[dict]:
             return None
         resp = m.generate_content(_GEMINI_PLAN_PROMPT.format(text=text))
         raw = (resp.text or "").strip()
+        print("[gemini_nlu] raw:", raw)
         j = re.search(r"\{.*\}", raw, flags=re.DOTALL)
         if not j:
             return None
         data = json.loads(j.group(0))
         if isinstance(data, dict):
             return data
-    except Exception:
-        pass
+    except Exception as e:
+        print("[gemini_nlu] error:", type(e).__name__, e)
+        return {
+            "intent": "gemini_error",
+            "error": type(e).__name__,
+            "message": str(e)[:300],
+        }
     return None
 
 def _unix_epoch(dts: dt.datetime) -> int:
