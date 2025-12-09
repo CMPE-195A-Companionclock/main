@@ -247,8 +247,10 @@ def send_to_server(path: str) -> str:
 
             dest    = nlu.get("destination")
             arrival = nlu.get("arrival_time")
-            prep    = nlu.get("prep_minutes")
             origin  = nlu.get("origin")
+
+            alarm_prop = nlu.get("alarm_proposal") or {}
+            prep = alarm_prop.get("plan", {}).get("prep_minutes") or nlu.get("prep_minutes")
 
             # Always pass along what Gemini already knows
             if dest:
@@ -266,7 +268,6 @@ def send_to_server(path: str) -> str:
                 # Follow-up will be handled by the UI
                 payload["cmd"] = "commute_missing"
             else:
-                alarm_prop = nlu.get("alarm_proposal") or {}
                 leave = (
                     alarm_prop.get("alarm_time")
                     or nlu.get("latest_leave_time")
@@ -297,6 +298,10 @@ def send_to_server(path: str) -> str:
                 payload["prep_minutes"] = prep
             if dest or arrival or leave:
                 payload["cmd"] = "set_commute"
+        elif intent == "toggle_commute_updates":
+            state = nlu.get("state")
+            payload["cmd"] = "toggle_commute_updates"
+            payload["state"] = state
 
         try:
             with open(VOICE_CMD_PATH, "w", encoding="utf-8") as g:
