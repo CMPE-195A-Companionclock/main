@@ -3,6 +3,7 @@ import time
 import os
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageTk
+from PIapp.calendar_service import get_calendar_service
 
 # Pandas is optional and only used for the CLI helper that prints a DataFrame.
 # Avoid importing it at module import time so the main UI can run without numpy/pandas.
@@ -90,6 +91,30 @@ def _font(size: int):
     _FONT_CACHE[size] = f
     return f
 
+def _get_month_events(year: int, month: int):
+    try:
+        svc = get_calendar_service()
+    except Exception as e:
+        print("calendarPage: failed to init GoogleCalendarService:", e)
+        return {}
+
+    try:
+        # You can tweak these if you like
+        events = svc.get_upcoming_events(max_results=200, days_ahead=60)
+    except Exception as e:
+        print("calendarPage: failed to fetch events:", e)
+        return {}
+
+    by_day: dict[int, list[dict]] = {}
+    for ev in events:
+        dt = ev.get("start_datetime")
+        if not dt:
+            continue
+        if dt.year == year and dt.month == month:
+            d = dt.day
+            by_day.setdefault(d, []).append(ev)
+
+    return by_day
 
 def draw_calendar_image(width: int = 1024, height: int = 600, top_margin: int = 20):
     """Return ImageTk.PhotoImage calendar for the current month.
@@ -101,12 +126,17 @@ def draw_calendar_image(width: int = 1024, height: int = 600, top_margin: int = 
 
     today = datetime.now()
     year, month = today.year, today.month
+
+    # Fetch events grouped by day for this month
+    events_by_day = _get_month_events(year, month)
+
     cal = calendar.Calendar(firstweekday=0)
     days = list(cal.itermonthdays(year, month))
 
     title_font = _font(28)
     day_font = _font(18)
     hdr_font = _font(16)
+    event_title_font = _font(12)  # small font for titles
 
     title = f"{year}/{month:02d}"
     try:
@@ -114,35 +144,103 @@ def draw_calendar_image(width: int = 1024, height: int = 600, top_margin: int = 
         tw, th = right - left, bottom - top
     except Exception:
         tw, th = drw.textsize(title, font=title_font)
-    drw.text(((width - tw) // 2, 10 + top_margin), title, font=title_font, fill=_COLOR)
+
+    # Month title
+    drw.text(
+        ((width - tw) // 2, 10 + top_margin),
+        title,
+        font=title_font,
+        fill=_COLOR,
+    )
 
     cols, rows = 7, 6
     grid_top = 110 + top_margin
     cell_w = width // cols
     cell_h = (height - grid_top) // rows
 
+    # Weekday headers
     wd_names = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
     for c, name in enumerate(wd_names):
-        drw.text((c * cell_w + 6, grid_top - 18), name, font=hdr_font, fill=_COLOR)
+        drw.text(
+            (c * cell_w + 6, grid_top - 18),
+            name,
+            font=hdr_font,
+            fill=_COLOR,
+        )
+
+    # Color for event markers (fits your maroon theme)
+    event_color = "#AA4444"
 
     row = col = 0
     for d in days:
         if d == 0:
+            # empty cell (padding days)
             col += 1
             if col == cols:
                 col = 0
                 row += 1
             continue
+
         x = col * cell_w
         y = grid_top + row * cell_h
-        # highlight today
+
+        # Highlight *today* with a rectangle (as before)
         if d == today.day:
-            drw.rectangle([x + 2, y + 2, x + cell_w - 2, y + cell_h - 2], outline=_COLOR, width=2)
+            drw.rectangle(
+                [x + 2, y + 2, x + cell_w - 2, y + cell_h - 2],
+                outline=_COLOR,
+                width=2,
+            )
+
+        # Day number
         drw.text((x + 6, y + 4), str(d), font=day_font, fill=_COLOR)
 
+        # ---------- Google Calendar events for this day ----------
+        day_events = events_by_day.get(d, [])
+        if day_events:
+            # 1) Dots along the bottom of the cell
+            max_markers = min(len(day_events), 3)
+            radius = 4
+            gap = 3
+
+            total_width = max_markers * (2 * radius) + (max_markers - 1) * gap
+            start_x = x + (cell_w - total_width) // 2
+            dot_y = y + cell_h - 12
+
+            for i in range(max_markers):
+                cx = start_x + i * (2 * radius + gap)
+                drw.ellipse(
+                    [cx, dot_y, cx + 2 * radius, dot_y + 2 * radius],
+                    fill=event_color,
+                    outline=None,
+                )
+
+            # 2) Short event titles just above the dots
+            max_chars = max(6, cell_w // 8)  # rough width limit
+            titles = []
+            for ev in day_events[:2]:  # show at most 2 titles per day
+                t = (ev.get("summary") or "").strip()
+                if not t:
+                    continue
+                if len(t) > max_chars:
+                    t = t[: max_chars - 1] + "…"
+                titles.append(t)
+
+            if titles:
+                title_text = " / ".join(titles)
+                title_y = dot_y - 16  # a bit above the dots
+                drw.text(
+                    (x + 4, title_y),
+                    title_text,
+                    font=event_title_font,
+                    fill=event_color,
+                )
+        # ---------------------------------------------------------
+
+        # Move to next cell
         col += 1
         if col == cols:
             col = 0
             row += 1
-
+            
     return ImageTk.PhotoImage(img)
