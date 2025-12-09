@@ -1,4 +1,6 @@
-PIapp/.env.venv/
+
 __pycache__/
 .vscode/
 *.pyc
+.env
+PIapp/.env
