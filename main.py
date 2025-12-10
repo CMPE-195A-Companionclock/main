@@ -18,6 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent / "PIapp"
 load_dotenv(BASE_DIR / ".env")
 
 VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", os.path.join(tempfile.gettempdir(), "cc_voice_cmd.json"))
+PC_SERVER = os.getenv("PC_SERVER", "http://10.0.0.111:5000")
 
 # === Smart commute auto-update settings ===
 SMART = {"COMMUTE_UPDATES": True}       # master on/off toggle
@@ -584,8 +585,9 @@ def run_touch_ui(fullscreen: bool = True):
                                 })
 
                             if speak:
-                                missing = cmd.get("missing", [])
-                                if "destination" in missing:
+                                if "destination" in missing and "arrival_time" in missing:
+                                    speak("I can help with your destination and arrival time. Where are you going, and what time do you need to arrive?")
+                                elif "destination" in missing:
                                     speak("Where are you going?")
                                 elif "arrival_time" in missing:
                                     speak("What time do you need to arrive?")
