@@ -14,7 +14,7 @@ from pvrecorder import PvRecorder
 try:
     from pathlib import Path
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).resolve().parent / ".env")
+    load_dotenv(Path(__file__).resolve().parent / ".pienv")
 except Exception:
     pass
 # Optional tiny popup UI for feedback
@@ -26,9 +26,9 @@ except Exception:
 # ====== CONFIG ======
 ACCESS_KEY   = os.getenv("PICOVOICE_ACCESS_KEY")  # Set your Picovoice AccessKey via env var
 # Align endpoint/device/seconds with voicePage defaults
-TRANSCRIBE_EP = os.getenv("VOICE_SERVER_URL", os.getenv("SERVER_URL", "http://192.168.0.10:5000/transcribe"))
-ARECORD_CARD = os.getenv("ARECORD_CARD", os.getenv("VOICE_ARECORD_DEVICE", "plughw:1,0"))  # Use plughw for resampling; override via env
-DEVICE_INDEX = int(os.getenv("PVREC_DEVICE_INDEX", "0"))  # pvrecorder input device index
+TRANSCRIBE_EP = os.getenv("VOICE_SERVER_URL", os.getenv("SERVER_URL", "http://10.0.0.111:5000/transcribe"))
+ARECORD_CARD = os.getenv("ARECORD_CARD", os.getenv("VOICE_ARECORD_DEVICE", "plughw:2,0"))  # Use plughw for resampling; override via env
+DEVICE_INDEX = int(os.getenv("PVREC_DEVICE_INDEX", "-1"))  # pvrecorder input device index
 # Built-in wake-words to use when no custom KEYWORD paths are available
 KEYWORDS     = ["jarvis"]
 
@@ -340,6 +340,7 @@ def main():
         print("PvRecorder devices:")
         for i, name in enumerate(devices):
             print(f"  [{i}] {name}")
+
     except Exception as e:
         print(f"Could not list PvRecorder devices: {e}")
     # Prefer custom keyword paths (KEYWORD) when provided and files exist; otherwise use built-in keywords.
@@ -380,12 +381,16 @@ def main():
     # Try PvRecorder first. If it fails due to GLIBC or other runtime issues, fall back to arecord-based streaming.
     use_arecord_stream = False
     sel_index = DEVICE_INDEX
+
     def _restart_recorder():
         rec = PvRecorder(device_index=sel_index, frame_length=porcupine.frame_length)
         rec.start()
         return rec
 
     try:
+        if sel_index < 0:
+            raise RuntimeError("PVREC_DEVICE_INDEX < 0 -> disable PvRecorder")
+
         # Allow selecting device by substring name via PVREC_DEVICE_NAME
         want_name = os.getenv("PVREC_DEVICE_NAME", "").strip().lower()
         if want_name:
