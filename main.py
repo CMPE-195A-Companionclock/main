@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 from PIapp.nlu import get_intent as nlu_get_intent
 from app_router import goto_view, schedule_alarm
 
+from PIapp.calendar_service import get_calendar_service
+from PIapp.calendar_ui import CalendarPage
+
 BASE_DIR = Path(__file__).resolve().parent / "PIapp"
 load_dotenv(BASE_DIR / ".env")
 
@@ -43,9 +46,39 @@ def run_server():
     app.run(host="0.0.0.0", port=5000, threaded=True)
 
 
-def show_calendar():
-    from PIapp.calendarPage import main as cal_main
-    cal_main()
+#def show_calendar():
+    #from PIapp.calendarPage import main as cal_main
+    #cal_main()
+
+def run_calendar_ui(windowed: bool = False):
+    """Open the full-screen CalendarPage UI (uses Google Calendar events)."""
+    import tkinter as tk
+
+    WINDOW_W, WINDOW_H = 1024, 600
+
+    root = tk.Tk()
+    root.title("CompanionClock – Calendar")
+
+    # Windowed vs fullscreen
+    if windowed:
+        root.geometry(f"{WINDOW_W}x{WINDOW_H}")
+    else:
+        root.attributes("-fullscreen", True)
+
+    # Background color should match CalendarPage default
+    root.configure(bg="#000000")
+
+    page = CalendarPage(root)
+    page.pack(fill=tk.BOTH, expand=True)
+
+    # Escape exits fullscreen/window
+    def close(event=None):
+        root.attributes("-fullscreen", False)
+        root.destroy()
+
+    root.bind("<Escape>", close)
+
+    root.mainloop()
 
 #legacy debug
 def route_intent(intent: dict):
@@ -78,6 +111,9 @@ def main(argv=None):
     sub.add_parser("voice", help="Run voice recognition (wake word -> record -> send)")
     sub.add_parser("server", help="Run PC-side ASR server (Flask + faster-whisper)")
     sub.add_parser("calendar", help="Print generated calendar DataFrame for the current month")
+    p_cal = sub.add_parser("calendar", help="Show Calendar UI with Google events")
+    p_cal.add_argument("--windowed", action="store_true",
+                   help="Run calendar in a window instead of fullscreen")
     p_ui = sub.add_parser("ui", help="Run touch-enabled main UI (default)")
     p_ui.add_argument("--windowed", action="store_true", help="Run windowed (not fullscreen)")
 
@@ -92,7 +128,7 @@ def main(argv=None):
     elif args.cmd == "server":
         run_server()
     elif args.cmd == "calendar":
-        show_calendar()
+        return run_calendar_ui(windowed=args.windowed)
     elif args.cmd == "ui":
         return run_touch_ui(fullscreen=not args.windowed)
     else:
