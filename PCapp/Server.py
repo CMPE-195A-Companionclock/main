@@ -307,12 +307,11 @@ def transcribe():
         # NLU
         local_nlu = get_intent(text) or {"intent": "none"}
         
-        if local_nlu.get("intent") == "set_alarm":
-            nlu = local_nlu
+        gem = gemini_nlu(text)
+        if isinstance(gem, dict) and gem.get("intent") == "plan_commute":
+            nlu = gem
         else:
-            # Otherwise let Gemini try (commute planning etc.),
-            # falling back to local_nlu if Gemini returns nothing.
-            nlu = gemini_nlu(text) or local_nlu
+            nlu = local_nlu 
 
         if isinstance(nlu, dict) and nlu.get("intent") == "plan_commute":
             arrival = nlu.get("arrival_time")
