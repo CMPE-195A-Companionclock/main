@@ -326,6 +326,17 @@ def send_to_server(path: str) -> str:
 
     except requests.RequestException as e:
         print(f"[voice] HTTP error posting audio: {e}")
+        try:
+            payload = {
+                "cmd": "network_error",
+                "error": str(e),
+            }
+            with open(VOICE_CMD_PATH, "w", encoding="utf-8") as g:
+                json.dump(payload, g, ensure_ascii=False)
+            print("[voice] wrote UI payload (network_error):", payload)
+        except Exception as e2:
+            print(f"[voice] could not write VOICE_CMD_PATH for network_error: {e2}")
+
         return ""
     except Exception as e:
         print(f"[voice] Unexpected error posting audio: {e}")
