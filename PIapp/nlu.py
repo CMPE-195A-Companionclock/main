@@ -96,9 +96,17 @@ def get_intent(text: str) -> Dict:
 
     if smart_off:
         return {"intent": "toggle_commute_updates", "state": "off"}
-
     if smart_on:
         return {"intent": "toggle_commute_updates", "state": "on"}
+    
+    if re.search(r"\b(delete|remove|clear)\b.*\balarm(s)?\b", t):
+        return {"intent": "delete_alarm"}
+    
+    if re.search(r"\b(turn off|disable|stop)\b.*\balarm(s)?\b", t):
+        return {"intent": "disable_all_alarms"}
+    if re.search(r"\b(turn on|enable)\b.*\balarm(s)?\b", t):
+        return {"intent": "enable_all_alarms"}
+    
     if any(w in words for w in ("weather", "forecast", "temperature", "rain", "sunny", "windy")):
         return {"intent": "goto", "view": "weather"}
     if any(w in words for w in ("calendar", "schedule", "appointments", "events", "month", "agenda")):

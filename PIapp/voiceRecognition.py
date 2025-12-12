@@ -306,10 +306,21 @@ def send_to_server(path: str) -> str:
                 payload["prep_minutes"] = prep
             if dest or arrival or leave:
                 payload["cmd"] = "set_commute"
+
         elif intent == "toggle_commute_updates":
             state = nlu.get("state")
             payload["cmd"] = "toggle_commute_updates"
             payload["state"] = state
+        
+        elif intent == "delete_alarm":
+            payload["cmd"] = "delete_alarm"
+
+        elif intent == "disable_all_alarms":
+            payload["cmd"] = "disable_all_alarms"
+        
+        elif intent == "enable_all_alarms":
+            payload["cmd"] = "enable_all_alarms"
+
         elif intent == "gemini_error":
             payload["cmd"] = "gemini_error"
             payload["error"] = nlu.get("error")

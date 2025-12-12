@@ -486,6 +486,77 @@ def run_touch_ui(fullscreen: bool = True):
                             if goto in {"clock", "weather", "calendar", "alarm"}:
                                 mode["view"] = goto
 
+                        elif cmd == "delete_alarm":
+                            if alarms["items"]:
+                                if len(alarms["items"]) > 1:
+                                    # Delete the currently selected alarm
+                                    deleted = alarms["items"].pop(alarms["i"])
+                                    alarms["i"] = min(
+                                        alarms["i"],
+                                        len(alarms["items"]) - 1,
+                                    )
+                                else:
+                                    # If there is only one alarm, just turn it off
+                                    alarms["items"][0]["enabled"] = False
+
+                                _save_alarms()
+                                ui_refresh["dirty"] = True
+                                mode["view"] = "alarm"
+                                try:
+                                    speak("Okay, I'll delete this alarm.")
+                                except Exception as e:
+                                    print(
+                                        "[ui] delete_alarm speak failed:",
+                                        repr(e),
+                                        flush=True,
+                                    )
+                        
+                        elif cmd == "disable_all_alarms":
+                            changed = False
+                            for a in alarms["items"]:
+                                if a.get("enabled"):
+                                    a["enabled"] = False
+                                    changed = True
+
+                            if changed:
+                                _save_alarms()
+                                ui_refresh["dirty"] = True
+
+                            mode["view"] = "alarm"
+
+                            try:
+                                if changed:
+                                    speak("Okay, I'll turn off all your alarms.")
+                                else:
+                                    speak("You don't have any alarms turned on.")
+                            except Exception as e:
+                                print(
+                                    "[ui] disable_all_alarms speak failed:",
+                                    repr(e),
+                                    flush=True,
+                                )
+
+                        elif cmd == "enable_all_alarms":
+                            changed = False
+                            for a in alarms["items"]:
+                                if not a.get("enabled"):
+                                    a["enabled"] = True
+                                    changed = True
+
+                            if changed:
+                                _save_alarms()
+                                ui_refresh["dirty"] = True
+
+                            mode["view"] = "alarm"
+
+                            try:
+                                if changed:
+                                    speak("Okay, I'll turn all your alarms back on.")
+                                else:
+                                    speak("You don't have any alarms to turn on.")
+                            except Exception as e:
+                                print("[ui] enable_all_alarms speak failed:", repr(e), flush=True)
+
                         elif cmd == "set_commute":
                             print("[ui] entering set_commute branch:", payload, flush=True)
                             if pending_commute:
@@ -565,6 +636,7 @@ def run_touch_ui(fullscreen: bool = True):
                                     speak("How many minutes do you need to get ready?")
                                 else:
                                     speak("I need a bit more information to plan your commute.")
+                        
                         elif cmd == "alarm_missing":
                             missing = payload.get("missing") or []
                             hour = payload.get("hour")
