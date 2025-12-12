@@ -584,6 +584,16 @@ def run_touch_ui(fullscreen: bool = True):
                                 SMART["COMMUTE_UPDATES"] = True
                                 if speak:
                                     speak("Okay, I turned on commute updates.")
+                                    
+                        elif cmd == "network_error":
+                            # Network between Pi and server is down
+                            try:
+                                speak(
+                                    "I couldn't contact the server to understand that. "
+                                    "Please check the network and try again."
+                                )
+                            except Exception as e:
+                                print("[ui] network_error speak failed:", repr(e), flush=True)
 
                         elif cmd == "gemini_error":
                             # make the clock honest about being unable to plan
