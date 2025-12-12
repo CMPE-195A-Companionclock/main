@@ -253,6 +253,7 @@ def run_touch_ui(fullscreen: bool = True):
     RANG_RECENT = set()
     _last_date = {"d": time.strftime("%Y-%m-%d")}
     pending_commute = {}
+    active_alarm = {"idx": None, "ts": 0.0}
 
     # Voice command inbox (simple file-based IPC with voiceRecognition.py)
     voice_cmd_state = {"last_mtime": 0.0}
@@ -511,6 +512,81 @@ def run_touch_ui(fullscreen: bool = True):
                                         flush=True,
                                     )
                         
+                        elif cmd == "snooze_alarm":
+                            idx = active_alarm.get("idx")
+                            if idx is None or idx >= len(alarms["items"]):
+                                # No active alarm to snooze
+                                try:
+                                    speak("I don't have a ringing alarm to snooze.")
+                                except Exception as e:
+                                    print("[ui] snooze_alarm speak failed:", repr(e), flush=True)
+                            else:
+                                try:
+                                    minutes = payload.get("minutes")
+                                    try:
+                                        minutes = int(minutes)
+                                    except Exception:
+                                        minutes = None
+                                    if minutes is None or minutes <= 0:
+                                        minutes = 10
+
+                                    now = time.time()
+                                    snooze_ts = now + minutes * 60
+                                    # Compute local hour/minute for the snooze time
+                                    snooze_struct = time.localtime(snooze_ts)
+                                    h = snooze_struct.tm_hour
+                                    m = snooze_struct.tm_min
+
+                                    # Add a new one-time snooze alarm
+                                    alarms["items"].append(
+                                        {
+                                            "hour": h,
+                                            "minute": m,
+                                            "enabled": True,
+                                            "snoozed": True,
+                                        }
+                                    )
+                                    alarms["i"] = len(alarms["items"]) - 1
+                                    _save_alarms()
+                                    ui_refresh["dirty"] = True
+                                    mode["view"] = "alarm"
+
+                                    # Clear active alarm marker
+                                    active_alarm["idx"] = None
+                                    active_alarm["ts"] = 0.0
+
+                                    try:
+                                        speak(f"Okay, snoozing for {minutes} minutes.")
+                                    except Exception as e:
+                                        print("[ui] snooze speak failed:", repr(e), flush=True)
+                                except Exception as e:
+                                    print("[ui] snooze_alarm error:", repr(e), flush=True)
+
+                        elif cmd == "stop_alarm":
+                            idx = active_alarm.get("idx")
+                            if idx is None or idx >= len(alarms["items"]):
+                                try:
+                                    speak("I don't have a ringing alarm to stop.")
+                                except Exception as e:
+                                    print("[ui] stop_alarm speak failed:", repr(e), flush=True)
+                            else:
+                                try:
+                                    # Disable just this alarm
+                                    alarms["items"][idx]["enabled"] = False
+                                    _save_alarms()
+                                    ui_refresh["dirty"] = True
+                                    mode["view"] = "alarm"
+
+                                    active_alarm["idx"] = None
+                                    active_alarm["ts"] = 0.0
+
+                                    try:
+                                        speak("Okay, I stopped this alarm.")
+                                    except Exception as e:
+                                        print("[ui] stop speak failed:", repr(e), flush=True)
+                                except Exception as e:
+                                    print("[ui] stop_alarm error:", repr(e), flush=True)
+                                          
                         elif cmd == "disable_all_alarms":
                             changed = False
                             for a in alarms["items"]:
@@ -802,7 +878,7 @@ def run_touch_ui(fullscreen: bool = True):
             now_h = int(time.strftime("%H"))
             now_m = int(time.strftime("%M"))
             today = time.strftime("%Y-%m-%d")
-            for a in list(alarms["items"]):
+            for idx, a in enumerate(list(alarms["items"])):
                 if not a.get("enabled"):
                     continue
                 key = (today, a.get("hour", 0), a.get("minute", 0))
@@ -815,7 +891,14 @@ def run_touch_ui(fullscreen: bool = True):
                     except Exception as e:
                         print("TTS alarm error:", e)
                         if not played:
+
                             print("No alarm sound played.")
+                    active_alarm["idx"] = idx
+                    active_alarm["ts"] = time.time()
+                    alarms["i"] = idx
+                    mode["view"] = "alarm"
+                    ui_refresh["dirty"] = True
+
                     RANG_RECENT.add(key)
         except Exception:
             pass

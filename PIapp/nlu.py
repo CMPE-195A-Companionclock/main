@@ -102,10 +102,27 @@ def get_intent(text: str) -> Dict:
     if re.search(r"\b(delete|remove|clear)\b.*\balarm(s)?\b", t):
         return {"intent": "delete_alarm"}
     
-    if re.search(r"\b(turn off|disable|stop)\b.*\balarm(s)?\b", t):
+    if re.search(r"\b(stop|dismiss)\b.*\b(this\s+)?alarm(s)?\b", t):
+        return {"intent": "stop_alarm"}
+    
+    if re.search(r"\b(turn off|disable|stop)\b.*\ball\s+(the\s+)?alarms\b", t):
         return {"intent": "disable_all_alarms"}
-    if re.search(r"\b(turn on|enable)\b.*\balarm(s)?\b", t):
+    
+    if re.search(r"\b(turn on|enable)\b.*\ball\s+(the\s+)?alarms\b", t):
         return {"intent": "enable_all_alarms"}
+    
+    if re.search(r"\bsnooze\b", t):
+        m = re.search(r"\bfor\s+(\d{1,2})\s+minute", t)
+        minutes = None
+        if m:
+            try:
+                minutes = int(m.group(1))
+            except ValueError:
+                minutes = None
+        return {"intent": "snooze_alarm", "minutes": minutes}
+    
+    if re.search(r"\b(stop|dismiss)\b.*\balarm(s)?\b", t):
+        return {"intent": "stop_alarm"}
     
     if any(w in words for w in ("weather", "forecast", "temperature", "rain", "sunny", "windy")):
         return {"intent": "goto", "view": "weather"}

@@ -326,6 +326,15 @@ def send_to_server(path: str) -> str:
             payload["error"] = nlu.get("error")
             payload["message"] = nlu.get("message")
 
+        elif intent == "snooze_alarm":
+            payload["cmd"] = "snooze_alarm"
+            minutes = nlu.get("minutes")
+            if minutes is not None:
+                payload["minutes"] = minutes
+
+        elif intent == "stop_alarm":
+            payload["cmd"] = "stop_alarm"
+
         try:
             with open(VOICE_CMD_PATH, "w", encoding="utf-8") as g:
                 json.dump(payload, g, ensure_ascii=False)
