@@ -7,6 +7,11 @@ def _parse_alarm_request(text: str):
 
     t = re.sub(r"\b(a\.m\.?|a\. m\.?)\b", "am", t)
     t = re.sub(r"\b(p\.m\.?|p\. m\.?)\b", "pm", t)
+    
+    t = re.sub(r"\b(\d{1,2})\s+in the morning\b",   r"\1 am", t)
+    t = re.sub(r"\b(\d{1,2})\s+in the afternoon\b", r"\1 pm", t)
+    t = re.sub(r"\b(\d{1,2})\s+in the evening\b",   r"\1 pm", t)
+    t = re.sub(r"\b(\d{1,2})\s+at night\b",         r"\1 pm", t)
 
     m = re.search(
         r"(?:set\s+(?:an\s+)?alarm(?:\s*(?:for|at|to))?"
