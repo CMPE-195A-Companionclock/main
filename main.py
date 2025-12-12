@@ -377,6 +377,7 @@ def run_touch_ui(fullscreen: bool = True):
                     commute_origin=cur.get("origin"),
                     commute_destination=cur.get("destination"),
                     prep_minutes=cur.get("prep_minutes"),
+                    smart_commute_updates=SMART["COMMUTE_UPDATES"],
                 )
                 cache["alarm"]["img"], cache["alarm"]["sig"] = tkimg, sig
             else:
