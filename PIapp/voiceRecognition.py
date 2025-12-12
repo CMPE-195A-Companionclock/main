@@ -130,11 +130,11 @@ def record_wav(path: str):
     """Record audio with arecord to the given path (16kHz, mono, 16-bit)."""
 
     chunk_ms = 100                 # analysis window size
-    silence_duration = 1.0         # seconds of silence to stop
+    silence_duration = 0.8         # seconds of silence to stop
     silence_rms_threshold = 500    # adjust based on mic level
 
     min_duration = 0.4
-    max_duration = 20.0 
+    max_duration = 8.0 
 
     bytes_per_sample = 2
     sample_rate = 16000
@@ -154,9 +154,8 @@ def record_wav(path: str):
 
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     audio_chunks: List[bytes] = []
-    silence_start = None
     t_start = time.time()
-
+    last_voice_time = None
     try:
         while True:
             chunk = proc.stdout.read(chunk_size)
@@ -173,14 +172,15 @@ def record_wav(path: str):
             rms = audioop.rms(chunk, bytes_per_sample)
 
             now = time.time()
-            if rms < silence_rms_threshold:
-                if silence_start is None:
-                    silence_start = now
-                elif (now - silence_start) >= silence_duration and elapsed >= min_duration:
-                    # Enough silence → stop
-                    break
+            if rms >= silence_rms_threshold:
+                last_voice_time = now
             else:
-                silence_start = None
+                if (
+                    last_voice_time is not None
+                    and (now - last_voice_time) >= silence_duration
+                    and elapsed >= min_duration
+                ):
+                    break
     finally:
         try:
             proc.terminate()
@@ -190,9 +190,11 @@ def record_wav(path: str):
             proc.wait(timeout=0.5)
         except Exception:
             pass
+
     if not audio_chunks:
         print("[voice] No audio captured; writing short silent WAV")
         audio_chunks = [b"\x00" * chunk_size]
+
     # Write collected PCM to a proper WAV file
     with wave.open(path, "wb") as wf:
         wf.setnchannels(channels)
@@ -251,6 +253,7 @@ def send_to_server(path: str) -> str:
             origin  = nlu.get("origin")
 
             alarm_prop = nlu.get("alarm_proposal") or {}
+            plan = alarm_prop.get("plan") or {}
             prep = alarm_prop.get("plan", {}).get("prep_minutes") or nlu.get("prep_minutes")
 
             # Always pass along what Gemini already knows
@@ -262,6 +265,8 @@ def send_to_server(path: str) -> str:
                 payload["prep_minutes"] = prep
             if origin:
                 payload["origin"] = origin
+            if plan:
+                payload["plan"] = plan
 
             payload["missing"] = missing
 
