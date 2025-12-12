@@ -262,6 +262,28 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
     _draw_label_value(info_y, f"From:", origin_txt)
     _draw_label_value(info_y + line_h, f"To:", dest_txt)
     _draw_label_value(info_y + 2 * line_h, f"Prep:", prep_txt)
+    plan_summary = ""
+    try:
+        if alarms is not None and isinstance(alarms, list) and 0 <= selected < len(alarms):
+            plan = alarms[selected].get("plan") or {}
+            if isinstance(plan, dict):
+                travel = plan.get("travel_minutes")
+                weather = plan.get("weather_buffer")
+                arrival = plan.get("arrival")
+                parts = []
+                if isinstance(travel, (int, float)):
+                    parts.append(f"Travel {int(travel)} min")
+                if isinstance(weather, (int, float)):
+                    parts.append(f"+ weather {int(weather)} min")
+                if arrival:
+                    parts.append(f"→ arrive by {arrival}")
+                if parts:
+                    plan_summary = " ".join(parts)
+    except Exception:
+        plan_summary = ""
+
+    if plan_summary:
+        _draw_label_value(info_y + 3*line_h, "Plan:", plan_summary)
 
     # Draw +/- above/below the hour and minute numbers
     layout = get_layout(hour, minute, total=total, selected=selected)
