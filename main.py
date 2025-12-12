@@ -461,6 +461,24 @@ def run_touch_ui(fullscreen: bool = True):
                                     mode["view"] = "alarm"
                                     ui_refresh["dirty"] = True
                                     _save_alarms()
+                                    try:
+                                        if h == 0:
+                                            h12, meridiem = 12, "AM"
+                                        elif 1 <= h < 12:
+                                            h12, meridiem = h, "AM"
+                                        elif h == 12:
+                                            h12, meridiem = 12, "PM"
+                                        else:
+                                            h12, meridiem = h - 12, "PM"
+                                        
+                                        time_phrase = f"{h12}:{m:02d} {meridiem}"
+                                        speak(f"Okay, I'll set an alarm for {time_phrase}.")
+                                    except Exception as e:
+                                        print(
+                                            "[ui] set_alarm speak failed:",
+                                            repr(e),
+                                            flush=True,
+                                        )
                             except Exception:
                                 pass
 
@@ -584,7 +602,7 @@ def run_touch_ui(fullscreen: bool = True):
                                 SMART["COMMUTE_UPDATES"] = True
                                 if speak:
                                     speak("Okay, I turned on commute updates.")
-                                    
+
                         elif cmd == "network_error":
                             # Network between Pi and server is down
                             try:
