@@ -15,7 +15,7 @@ from PIapp.nlu import get_intent as nlu_get_intent
 from app_router import goto_view, schedule_alarm
 
 from PIapp.calendar_service import get_calendar_service
-from PIapp.calendar_ui import CalendarPage
+from PIapp.calendarPage import draw_calendar_image
 
 BASE_DIR = Path(__file__).resolve().parent / "PIapp"
 load_dotenv(BASE_DIR / ".env")
@@ -68,9 +68,16 @@ def run_calendar_ui(windowed: bool = False):
     # Background color should match CalendarPage default
     root.configure(bg="#000000")
 
-    page = CalendarPage(root)
-    page.pack(fill=tk.BOTH, expand=True)
+    label = tk.Label(root, bg="#000000")
+    label.pack(fill=tk.BOTH, expand=True)
 
+    def render():
+        img = draw_calendar_image(WINDOW_W, WINDOW_H, top_margin=24)
+        label.config(image=img)
+        label.image = img
+
+    render()
+    
     # Escape exits fullscreen/window
     def close(event=None):
         root.attributes("-fullscreen", False)
@@ -110,7 +117,7 @@ def main(argv=None):
 
     sub.add_parser("voice", help="Run voice recognition (wake word -> record -> send)")
     sub.add_parser("server", help="Run PC-side ASR server (Flask + faster-whisper)")
-    sub.add_parser("calendar", help="Print generated calendar DataFrame for the current month")
+    
     p_cal = sub.add_parser("calendar", help="Show Calendar UI with Google events")
     p_cal.add_argument("--windowed", action="store_true",
                    help="Run calendar in a window instead of fullscreen")
@@ -256,104 +263,6 @@ def run_touch_ui(fullscreen: bool = True):
         "alarm": {"img": None, "sig": None},
     }
     ui_refresh = {"dirty": False}
-
-    def _load_alarms():
-        try:
-            if os.path.exists(ALARM_STORE):
-                with open(ALARM_STORE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                if isinstance(data, list) and data:
-                    cleaned = []
-                    for a in data:
-                        try:
-                            cleaned.append(
-                                {
-                                    "hour": int(a.get("hour", 0)),
-                                    "minute": int(a.get("minute", 0)),
-                                    "enabled": bool(a.get("enabled", False)),
-                                }
-                            )
-                        except Exception:
-                            continue
-                    if cleaned:
-                        return cleaned
-        except Exception as e:
-            print("Alarm load failed:", e)
-        return None
-
-    def _save_alarms():
-        try:
-            os.makedirs(os.path.dirname(ALARM_STORE), exist_ok=True)
-            tmp = ALARM_STORE + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(alarms["items"], f)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, ALARM_STORE)
-        except Exception as e:
-            print("Alarm save failed:", e)
-
-    def _ensure_alarm_sound() -> Optional[str]:
-        """Create a small WAV beep for the alarm if it doesn't exist."""
-        path = os.path.join(LOCAL_TMP, "alarm_beep.wav")
-        if alarm_sound.get("path") and os.path.exists(alarm_sound["path"]):
-            return alarm_sound["path"]
-        try:
-            os.makedirs(LOCAL_TMP, exist_ok=True)
-        except Exception:
-            pass
-        try:
-            if not os.path.exists(path):
-                import math
-                import wave
-                import array
-
-                sample_rate = 16000
-                duration = 1.0  # seconds
-                freq = 880.0
-                volume = 0.35
-                samples = array.array("h")
-                total = int(sample_rate * duration)
-                for i in range(total):
-                    val = int(volume * 32767 * math.sin(2 * math.pi * freq * (i / sample_rate)))
-                    samples.append(val)
-                with wave.open(path, "w") as wf:
-                    wf.setnchannels(1)
-                    wf.setsampwidth(2)
-                    wf.setframerate(sample_rate)
-                    wf.writeframes(samples.tobytes())
-            alarm_sound["path"] = path
-            return path
-        except Exception as e:
-            print("Alarm sound generation failed:", e)
-            return None
-
-    def play_alarm_sound() -> bool:
-        """Play the generated alarm beep; returns True on success."""
-        path = _ensure_alarm_sound()
-        if not path:
-            return False
-        # Windows fallback: winsound
-        if sys.platform.startswith("win"):
-            try:
-                import winsound
-
-                winsound.PlaySound(path, winsound.SND_FILENAME | winsound.SND_ASYNC)
-                return True
-            except Exception as e:
-                print("Alarm sound playback failed (winsound):", e)
-        # POSIX: try aplay
-        try:
-            res = subprocess.run(
-                ["aplay", "-q", path], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-            if res.returncode == 0:
-                return True
-        except Exception as e:
-            print("Alarm sound playback failed (aplay):", e)
-        return False
-
-    alarm_sound = {"path": None}
 
     def _ensure_alarm_sound() -> Optional[str]:
         """Create a small WAV beep for the alarm if it doesn't exist."""
@@ -560,6 +469,7 @@ def run_touch_ui(fullscreen: bool = True):
                                 mode["view"] = goto
 
                         elif cmd == "set_commute":
+                            print("[ui] entering set_commute branch:", payload, flush=True)
                             if pending_commute:
                                 for key in ("destination", "arrival_time", "prep_minutes", "origin"):
                                     if key not in payload or not payload.get(key):
@@ -570,9 +480,14 @@ def run_touch_ui(fullscreen: bool = True):
                                 or payload.get("arrival_time")
                                 or ""
                             ).strip()
-                            alarm_time = payload["leave_time"]  # or from alarm_proposal
-                            dest = payload["destination"]
-                            speak(f"Okay, I'll wake you at {alarm_time} so you can get to {dest} on time.")
+
+                            alarm_time = payload.get("leave_time")  # or from alarm_proposal
+                            dest = payload.get("destination")
+                            try:
+                                speak(f"Okay, I'll wake you at {alarm_time} so you can get to {dest} on time.")
+                            except Exception as e:
+                                print("[ui] set_commute speak failed:", repr(e), flush=True)
+
                             if hhmm:
                                 try:
                                     h, m = [int(x) for x in hhmm.split(":", 1)]
@@ -601,7 +516,7 @@ def run_touch_ui(fullscreen: bool = True):
                                     mode["view"] = "alarm"
                                     pending_commute.clear()
                                 except Exception:
-                                    pass
+                                    print("[ui] set_commute alarm creation failed:", repr(e), flush=True)
 
                         elif cmd == "commute_missing":
                             missing = payload.get("missing") or []
@@ -637,44 +552,56 @@ def run_touch_ui(fullscreen: bool = True):
                             minute = payload.get("minute")
 
                             try:
-                                from PIapp.pi_tts import speak
+                                from PIapp.pi_tts import speak as _speak
                             except Exception:
-                                speak = None
+                                _speak = None
 
-                            if speak:
+                            if _speak:
                                 if "meridiem" in missing and isinstance(hour, int):
                                     # 5 → "5 o'clock"
                                     if minute in (0, None):
-                                        spoken_time = f"{hour} o'clock"
+                                        time_phrase = f"{hour} o'clock"
                                     else:
-                                        spoken_time = f"{hour} {minute:02d}"
+                                        time_phrase = f"{hour} {minute:02d}"
 
-                                    speak(
-                                        f"Did you mean {spoken_time} A M or {spoken_time} P M? "
-                                        f"Please repeat and say, for example, "
-                                        f"set an alarm for {hour} A M."
+                                    _speak(
+                                        f"Did you mean {time_phrase} A M or {time_phrase} P M? "
+                                    )
+                                elif "time" in missing:
+                                    _speak(
+                                        "What time should I set the alarm for?"
                                     )
                                 else:
-                                    speak(
-                                        "Did you mean A M or P M? "
-                                        "Please repeat the alarm with A M or P M."
-                                    )
+                                    _speak("I need a bit more information to set the alarm.")
 
                         elif cmd == "toggle_commute_updates":
                             state = payload.get("state")
                             if state == "off":
                                 SMART["COMMUTE_UPDATES"] = False
-                                speak("Okay, I turned off automatic commute updates.")
+                                if speak:
+                                    speak("Okay, I turned off automatic commute updates.")
                             elif state == "on":
                                 SMART["COMMUTE_UPDATES"] = True
-                                speak("Okay, I turned on commute updates.")
+                                if speak:
+                                    speak("Okay, I turned on commute updates.")
 
-                        elif cmd.get("intent") == "gemini_error":
+                        elif cmd == "gemini_error":
                             # make the clock honest about being unable to plan
-                            msg = "I couldn't plan your commute right now because the AI service is unavailable."
-                            print("[voice] Gemini error:", cmd.get("error"), cmd.get("message"))
-                            speak(msg) 
-                        
+                            try:
+                                from PIapp.pi_tts import speak as _speak
+                            except Exception:
+                                _speak = None
+
+                            err = payload.get("error") or "UnknownError"
+                            msg_txt = payload.get("message") or ""
+                            print("[voice] Gemini error:", err, msg_txt)
+
+                            spoken =  (
+                                "I couldn't plan your commute right now because "
+                                "the AI service is unavailable. I'll fall back to the regular alarm."
+                            )
+                            if _speak:
+                                _speak(spoken)        
 
                     try:
                         os.remove(VOICE_CMD_PATH)
