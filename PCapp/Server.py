@@ -306,14 +306,34 @@ def transcribe():
 
         # NLU
         local_nlu = get_intent(text) or {"intent": "none"}
+        nlu = local_nlu
         
-        gem = gemini_nlu(text)
-        if isinstance(gem, dict) and gem.get("intent") == "plan_commute":
-            nlu = gem
-        elif isinstance(gem, dict) and gem.get("intent") == "gemini_error":
-            nlu = gem        
+        lower_text = text.lower()
+        looks_like_commute = any(
+            phrase in lower_text
+            for phrase in [
+                "commute",
+                "traffic",
+                "drive",
+                "driving",
+                "get to",
+                "get me to",
+                "how long will it take",
+                "plan my commute",
+                "plan a commute",
+            ]
+        )
+        if looks_like_commute:
+            gem = gemini_nlu(text)
+                
+            if isinstance(gem, dict) and gem.get("intent") == "plan_commute":
+                nlu = gem
+            elif isinstance(gem, dict) and gem.get("intent") == "gemini_error":
+                nlu = gem        
+            else:
+                nlu = local_nlu 
         else:
-            nlu = local_nlu 
+            nlu = local_nlu
 
         if isinstance(nlu, dict) and nlu.get("intent") == "plan_commute":
             arrival = nlu.get("arrival_time")
