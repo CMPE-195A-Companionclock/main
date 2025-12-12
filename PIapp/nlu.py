@@ -8,10 +8,30 @@ def _parse_alarm_request(text: str):
     t = re.sub(r"\b(a\.m\.?|a\. m\.?)\b", "am", t)
     t = re.sub(r"\b(p\.m\.?|p\. m\.?)\b", "pm", t)
     
+    word_to_digit = {
+        "one": "1",
+        "two": "2",
+        "three": "3",
+        "four": "4",
+        "five": "5",
+        "six": "6",
+        "seven": "7",
+        "eight": "8",
+        "nine": "9",
+        "ten": "10",
+        "eleven": "11",
+        "twelve": "12",
+    }
+
+    for w, d in word_to_digit.items():
+        t = re.sub(rf"\b{w}\b", d, t)
+
     t = re.sub(r"\b(\d{1,2})\s+in the morning\b",   r"\1 am", t)
     t = re.sub(r"\b(\d{1,2})\s+in the afternoon\b", r"\1 pm", t)
     t = re.sub(r"\b(\d{1,2})\s+in the evening\b",   r"\1 pm", t)
     t = re.sub(r"\b(\d{1,2})\s+at night\b",         r"\1 pm", t)
+
+    t = re.sub(r"\b(\d{1,2})\.(\d{2})\b", r"\1:\2", t)
 
     m = re.search(
         r"(?:set\s+(?:an\s+)?alarm(?:\s*(?:for|at|to))?"
@@ -38,16 +58,10 @@ def _parse_alarm_request(text: str):
         if meridiem == "am":
             hour_24 = 0 if hour == 12 else hour
         else:  # pm
-            hour_24 = 12 if hour == 12 else hour + 12
-        return {
-            "intent": "set_alarm",
-            "alarm_time": f"{hour_24:02d}:{minute:02d}",
-            "hour": hour_24,
-            "minute": minute,
-        }
-    
-    if hour > 12:
-        hour_24 = 0 if hour == 24 else hour
+            hour_24 = hour if hour == 12 else hour + 12
+        if hour_24 == 24:
+            hour_24 = 0
+
         return {
             "intent": "set_alarm",
             "alarm_time": f"{hour_24:02d}:{minute:02d}",
