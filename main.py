@@ -524,6 +524,7 @@ def run_touch_ui(fullscreen: bool = True):
                                             "prep_minutes": payload.get("prep_minutes"),
                                             "arrival_time": payload.get("arrival_time"),
                                             "leave_time": payload.get("leave_time"),
+                                            "plan": payload.get("plan"),
                                             "base_hour": h,
                                             "base_minute": m,
                                             "last_replan_ts": 0,
