@@ -310,6 +310,8 @@ def transcribe():
         gem = gemini_nlu(text)
         if isinstance(gem, dict) and gem.get("intent") == "plan_commute":
             nlu = gem
+        elif isinstance(gem, dict) and gem.get("intent") == "gemini_error":
+            nlu = gem        
         else:
             nlu = local_nlu 
 
