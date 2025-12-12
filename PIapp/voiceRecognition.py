@@ -10,6 +10,7 @@ import wave
 from typing import List
 import pvporcupine
 from pvrecorder import PvRecorder
+import tempfile
 # Load local .env when running module directly
 try:
     from pathlib import Path
@@ -45,7 +46,7 @@ RECORD_SEC   = int(os.getenv("VOICE_SEC", "10"))  # seconds to record after wake
 COOLDOWN_SEC = 1.5             # ignore new triggers for this long after each detection
 SAVE_DIR     = "/tmp"          # where temp wav files are stored
 # Voice command file path for UI IPC
-VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", "/tmp/cc_voice_cmd.json")
+VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", os.path.join(tempfile.gettempdir(), "cc_voice_cmd.json"))
 # Offline mode (no Flask). If set to "1", skip sending to server and optionally play back.
 OFFLINE_ONLY = os.getenv("VOICE_OFFLINE", "0") == "1"
 
@@ -264,18 +265,20 @@ def send_to_server(path: str) -> str:
 
             payload["missing"] = missing
 
-            if missing:
+            leave = (
+                alarm_prop.get("alarm_time")
+                or nlu.get("latest_leave_time")
+                or nlu.get("leave_time")
+            )
+            
+            if leave:
+                payload["leave_time"] = leave
+                payload["cmd"] = "set_commute"
+            elif missing:
                 # Follow-up will be handled by the UI
                 payload["cmd"] = "commute_missing"
             else:
-                leave = (
-                    alarm_prop.get("alarm_time")
-                    or nlu.get("latest_leave_time")
-                    or nlu.get("leave_time")
-                )
-                if leave:
-                    payload["leave_time"] = leave
-                payload["cmd"] = "set_commute"
+                payload["cmd"] = "commute_missing"
 
         elif intent == "set_commute":
             dest = nlu.get("destination")
@@ -302,6 +305,10 @@ def send_to_server(path: str) -> str:
             state = nlu.get("state")
             payload["cmd"] = "toggle_commute_updates"
             payload["state"] = state
+        elif intent == "gemini_error":
+            payload["cmd"] = "gemini_error"
+            payload["error"] = nlu.get("error")
+            payload["message"] = nlu.get("message")
 
         try:
             with open(VOICE_CMD_PATH, "w", encoding="utf-8") as g:
