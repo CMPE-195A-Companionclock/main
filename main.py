@@ -7,6 +7,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Optional
+import threading
 
 import requests
 from dotenv import load_dotenv
@@ -23,11 +24,10 @@ load_dotenv(BASE_DIR / ".env")
 VOICE_CMD_PATH = os.getenv("VOICE_CMD_PATH", os.path.join(tempfile.gettempdir(), "cc_voice_cmd.json"))
 PC_SERVER = os.getenv("PC_SERVER", "http://10.0.0.111:5000")
 
-# === Smart commute auto-update settings ===
-SMART = {"COMMUTE_UPDATES": True}       # master on/off toggle
-COMMUTE_REPLAN_INTERVAL_MIN = 15        # how often to ask server again
-COMMUTE_UPDATE_THRESHOLD_MIN = 5        # only move alarm if change >= this many minutes
-COMMUTE_FREEZE_WINDOW_MIN = 30          # stop auto-adjusting this many minutes before alarm
+SMART = {"COMMUTE_UPDATES": True}
+COMMUTE_REPLAN_INTERVAL_MIN = 15
+COMMUTE_UPDATE_THRESHOLD_MIN = 5
+COMMUTE_FREEZE_WINDOW_MIN = 30
 
 
 def run_clock(windowed: bool = False):
@@ -41,34 +41,36 @@ def run_voice():
 
 
 def run_server():
-    # This runs the Flask ASR server locally. Intended for PC side.
     from PCapp.Server import app
     app.run(host="0.0.0.0", port=5000, threaded=True)
-
-
-#def show_calendar():
-    #from PIapp.calendarPage import main as cal_main
-    #cal_main()
 
 def run_calendar_ui(windowed: bool = False):
     """Open the full-screen CalendarPage UI (uses Google Calendar events)."""
     import tkinter as tk
 
     WINDOW_W, WINDOW_H = 1024, 600
+    BASE_DIR_ABS = os.path.abspath(os.path.dirname(__file__))
+    LOCAL_TMP = os.path.join(BASE_DIR_ABS, "PIapp", "tmp")
+    try:
+        os.makedirs(LOCAL_TMP, exist_ok=True)
+    except Exception:
+        pass
 
     root = tk.Tk()
-    root.title("CompanionClock – Calendar")
+    root.title("CompanionClock")
 
-    # Windowed vs fullscreen
-    if windowed:
+    if not windowed:
+        screen_w = root.winfo_screenwidth()
+        screen_h = root.winfo_screenheight()
+        WINDOW_W, WINDOW_H = screen_w, screen_h
+        root.attributes("-fullscreen", True)
         root.geometry(f"{WINDOW_W}x{WINDOW_H}")
     else:
-        root.attributes("-fullscreen", True)
+        root.geometry(f"{WINDOW_W}x{WINDOW_H}")
 
-    # Background color should match CalendarPage default
-    root.configure(bg="#000000")
-
-    label = tk.Label(root, bg="#000000")
+    root.configure(bg="black")
+    
+    label = tk.Label(root, bg="black")
     label.pack(fill=tk.BOTH, expand=True)
 
     def render():
@@ -77,17 +79,14 @@ def run_calendar_ui(windowed: bool = False):
         label.image = img
 
     render()
-    
-    # Escape exits fullscreen/window
+
     def close(event=None):
         root.attributes("-fullscreen", False)
         root.destroy()
 
     root.bind("<Escape>", close)
-
     root.mainloop()
 
-#legacy debug
 def route_intent(intent: dict):
     it = (intent or {}).get("intent")
     if it == "goto":
@@ -101,7 +100,6 @@ def route_intent(intent: dict):
             except Exception as e:
                 print("Failed to schedule alarm:", e)
 
-#legacy helper
 def handle_recognized_text(text: str):
     intent = nlu_get_intent(text)
     print("NLU:", intent)
@@ -149,6 +147,8 @@ print("UI VOICE_CMD_PATH:", VOICE_CMD_PATH)
 
 def run_touch_ui(fullscreen: bool = True):
     from PIapp.pi_tts import speak
+    from datetime import datetime, timedelta
+    from PIapp.calendar_service import get_calendar_service
     try:
         import tkinter as tk
     except Exception as e:
@@ -161,7 +161,6 @@ def run_touch_ui(fullscreen: bool = True):
         print("Pillow is not installed. Run: pip install pillow")
         print(f"Detail: {e}")
         return 1
-    # Import page modules directly
     try:
         from PIapp.clock import drawClock as draw_clock_page
         import PIapp.weather as weather_mod
@@ -182,13 +181,33 @@ def run_touch_ui(fullscreen: bool = True):
 
     root = tk.Tk()
     root.title("CompanionClock")
-    root.geometry(f"{WINDOW_W}x{WINDOW_H}")
+
     if fullscreen:
+        screen_w = root.winfo_screenwidth()
+        screen_h = root.winfo_screenheight()
+        WINDOW_W, WINDOW_H = screen_w, screen_h
         root.attributes("-fullscreen", True)
+        root.geometry(f"{WINDOW_W}x{WINDOW_H}")
+    else:
+        root.geometry(f"{WINDOW_W}x{WINDOW_H}")
     root.configure(bg="black")
 
     label = tk.Label(root)
-    label.pack()
+    label.pack(fill=tk.BOTH, expand=True)
+    try:
+        import PIapp.clock as clock_mod
+        import PIapp.Alarm as alarm_mod
+
+        clock_mod.windowWidth = WINDOW_W
+        clock_mod.windowHeight = WINDOW_H
+
+        weather_mod.windowWidth = WINDOW_W
+        weather_mod.windowHeight = WINDOW_H
+
+        alarm_mod.WINDOW_W = WINDOW_W
+        alarm_mod.WINDOW_H = WINDOW_H
+    except Exception as e:
+        print("Warning: failed to update page module sizes:", e)
 
     try:
         speak("Companion Clock is ready.")
@@ -200,8 +219,7 @@ def run_touch_ui(fullscreen: bool = True):
         safe_msg = msg.encode("ascii", "backslashreplace").decode("ascii")
         print("TTS startup error:", safe_msg)
 
-    # State
-    mode = {"view": "clock"}  # calendar | weather | clock | alarm
+    mode = {"view": "clock"}
     api_key: Optional[str] = os.getenv("WEATHERAPI_KEY")
     weather_data: Optional[dict] = None
     last_fetch = 0.0
@@ -219,13 +237,29 @@ def run_touch_ui(fullscreen: bool = True):
                     cleaned = []
                     for a in data:
                         try:
-                            cleaned.append(
-                                {
-                                    "hour": int(a.get("hour", 0)),
-                                    "minute": int(a.get("minute", 0)),
-                                    "enabled": bool(a.get("enabled", False)),
-                                }
-                            )
+                            base ={
+                                 "hour": int(a.get("hour", 0)),
+                                 "minute": int(a.get("minute", 0)),
+                                 "enabled": bool(a.get("enabled", False)),
+                            }
+
+                            for key in [
+                                "commute",
+                                "destination",
+                                "origin",
+                                "prep_minutes",
+                                "arrival_time",
+                                "leave_time",
+                                "plan",
+                                "base_hour",
+                                "base_minute",
+                                "last_replan_ts",
+                                "snoozed",
+                            ]:
+                                if key in a:
+                                    base[key] = a[key]
+
+                            cleaned.append(base)
                         except Exception:
                             continue
                     if cleaned:
@@ -254,8 +288,7 @@ def run_touch_ui(fullscreen: bool = True):
     _last_date = {"d": time.strftime("%Y-%m-%d")}
     pending_commute = {}
     active_alarm = {"idx": None, "ts": 0.0}
-
-    # Voice command inbox (simple file-based IPC with voiceRecognition.py)
+    
     voice_cmd_state = {"last_mtime": 0.0}
     view_state = {"last": None}
     cache = {
@@ -281,7 +314,7 @@ def run_touch_ui(fullscreen: bool = True):
                 import array
 
                 sample_rate = 16000
-                duration = 1.0  # seconds
+                duration = 1.0
                 freq = 880.0
                 volume = 0.35
                 samples = array.array("h")
@@ -305,7 +338,6 @@ def run_touch_ui(fullscreen: bool = True):
         path = _ensure_alarm_sound()
         if not path:
             return False
-        # Windows fallback: winsound
         if sys.platform.startswith("win"):
             try:
                 import winsound
@@ -314,7 +346,6 @@ def run_touch_ui(fullscreen: bool = True):
                 return True
             except Exception as e:
                 print("Alarm sound playback failed (winsound):", e)
-        # POSIX: try aplay
         try:
             res = subprocess.run(
                 ["aplay", "-q", path], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -382,7 +413,7 @@ def run_touch_ui(fullscreen: bool = True):
                 cache["alarm"]["img"], cache["alarm"]["sig"] = tkimg, sig
             else:
                 tkimg = cache["alarm"]["img"]
-        else:  # clock
+        else:
             day_name = time.strftime("%a")
             today = time.strftime("%Y/%m/%d")
             current_time = time.strftime("%H:%M")
@@ -396,6 +427,106 @@ def run_touch_ui(fullscreen: bool = True):
     timer = {"id": None}
     weather_fetching = {"busy": False}
 
+    def speak_weather_summary(when: str = "today"):
+        nonlocal weather_data
+        if not isinstance(weather_data, dict) or "forecast" not in weather_data:
+            try:
+                if api_key:
+                    weather_data = weather_mod.getWeatherForecast(api_key, 3)
+            except Exception as e:
+                print("[ui] weather summary fetch failed:", e, flush=True)
+                try:
+                    speak("Sorry, I can't get the weather right now.")
+                except Exception:
+                    pass
+                return
+
+        try:
+            loc = weather_data["location"]["name"]
+            current = weather_data["current"]
+            days = weather_data["forecast"]["forecastday"]
+
+            index = 0 if when != "tomorrow" else 1
+            if index >= len(days):
+                index = 0
+
+            day = days[index]
+            day_label = "Today" if index == 0 else "Tomorrow"
+
+            cond_now = current["condition"]["text"].lower()
+            temp_now = round(current["temp_c"])
+            hi = round(day["day"]["maxtemp_c"])
+            lo = round(day["day"]["mintemp_c"])
+
+            msg = (
+                f"{day_label} in {loc}, "
+                f"it's {temp_now} degrees and {cond_now}. "
+                f"The high will be about {hi} and the low about {lo}."
+            )
+            speak(msg)
+        except Exception as e:
+            print("[ui] weather summary parse failed:", e, flush=True)
+            try:
+                speak("Sorry, I couldn't read the weather data.")
+            except Exception:
+                pass
+
+    def speak_events_summary(when: str = "today"):
+        """Speak a summary of today's or tomorrow's calendar events."""
+        try:
+            svc = get_calendar_service()
+        except Exception as e:
+            print("[ui] calendar summary service error:", e, flush=True)
+            try:
+                speak("Sorry, I can't reach your calendar right now.")
+            except Exception:
+                pass
+            return
+
+        try:
+            if when == "tomorrow":
+                target = (datetime.now() + timedelta(days=1)).date()
+                evs = svc.get_upcoming_events(max_results=50, days_ahead=2)
+                events = [e for e in evs if e["start_datetime"].date() == target]
+            else:
+                events = svc.get_todays_events()
+        except Exception as e:
+            print("[ui] calendar summary fetch error:", e, flush=True)
+            try:
+                speak("Sorry, I couldn't fetch your calendar events.")
+            except Exception:
+                pass
+            return
+
+        when_word = "tomorrow" if when == "tomorrow" else "today"
+        if not events:
+            speak(f"You don't have any events {when_word}.")
+            return
+
+        count = len(events)
+        max_list = 3
+        parts = []
+        for ev in events[:max_list]:
+            title = ev["summary"]
+            time_str = ev["start_time"]
+            if time_str == "All Day":
+                parts.append(f"{title} all day")
+            else:
+                parts.append(f"{title} at {time_str}")
+
+        if count == 1:
+            msg = f"You have one event {when_word}: {parts[0]}."
+        elif count <= max_list:
+            msg = f"You have {count} events {when_word}: " + "; ".join(parts) + "."
+        else:
+            remaining = count - max_list
+            msg = (
+                f"You have {count} events {when_word}. "
+                + "; ".join(parts)
+                + f"; and {remaining} more."
+            )
+        speak(msg)
+
 
     def tick():
         nonlocal last_fetch, weather_data, pending_commute, commute_last_check
@@ -407,26 +538,19 @@ def run_touch_ui(fullscreen: bool = True):
 
         if api_key and (now - last_fetch > 600 or weather_data is None) and not weather_fetching["busy"]:
             weather_fetching["busy"] = True
-            import threading
+            
 
-            def _do_fetch():
-                nonlocal weather_data, last_fetch
-                try:
-                    data = weather_mod.getWeatherForecast(api_key, 3)
-                except Exception:
-                    data = None
-
-                def _apply():
-                    nonlocal weather_data, last_fetch
-                    weather_data = data
-                    last_fetch = time.time()
-                    weather_fetching["busy"] = False
-                    if mode["view"] == "weather":
-                        render()
-
-                root.after(0, _apply)
-
-            threading.Thread(target=_do_fetch, daemon=True).start()
+        def _fetch_weather(idx, alarm_snapshot):
+            nonlocal weather_data, last_fetch
+            try:
+                data = weather_mod.getWeatherForecast(api_key, 3)
+            except Exception:
+                data = None
+            weather_data = data
+            last_fetch = time.time()
+            weather_fetching["busy"] = False
+            ui_refresh["dirty"] = True
+            threading.Thread(target=_fetch_weather, daemon=True).start()
 
         VOICE_POLL_EVERY = 2.0
         voice_poll_ok = now - voice_cmd_state.get("last_check", 0.0) > VOICE_POLL_EVERY
@@ -491,14 +615,12 @@ def run_touch_ui(fullscreen: bool = True):
                         elif cmd == "delete_alarm":
                             if alarms["items"]:
                                 if len(alarms["items"]) > 1:
-                                    # Delete the currently selected alarm
                                     deleted = alarms["items"].pop(alarms["i"])
                                     alarms["i"] = min(
                                         alarms["i"],
                                         len(alarms["items"]) - 1,
                                     )
                                 else:
-                                    # If there is only one alarm, just turn it off
                                     alarms["items"][0]["enabled"] = False
 
                                 _save_alarms()
@@ -516,7 +638,6 @@ def run_touch_ui(fullscreen: bool = True):
                         elif cmd == "snooze_alarm":
                             idx = active_alarm.get("idx")
                             if idx is None or idx >= len(alarms["items"]):
-                                # No active alarm to snooze
                                 try:
                                     speak("I don't have a ringing alarm to snooze.")
                                 except Exception as e:
@@ -533,12 +654,10 @@ def run_touch_ui(fullscreen: bool = True):
 
                                     now = time.time()
                                     snooze_ts = now + minutes * 60
-                                    # Compute local hour/minute for the snooze time
                                     snooze_struct = time.localtime(snooze_ts)
                                     h = snooze_struct.tm_hour
                                     m = snooze_struct.tm_min
 
-                                    # Add a new one-time snooze alarm
                                     alarms["items"].append(
                                         {
                                             "hour": h,
@@ -552,7 +671,6 @@ def run_touch_ui(fullscreen: bool = True):
                                     ui_refresh["dirty"] = True
                                     mode["view"] = "alarm"
 
-                                    # Clear active alarm marker
                                     active_alarm["idx"] = None
                                     active_alarm["ts"] = 0.0
 
@@ -572,7 +690,6 @@ def run_touch_ui(fullscreen: bool = True):
                                     print("[ui] stop_alarm speak failed:", repr(e), flush=True)
                             else:
                                 try:
-                                    # Disable just this alarm
                                     alarms["items"][idx]["enabled"] = False
                                     _save_alarms()
                                     ui_refresh["dirty"] = True
@@ -726,7 +843,6 @@ def run_touch_ui(fullscreen: bool = True):
 
                             if _speak:
                                 if "meridiem" in missing and isinstance(hour, int):
-                                    # 5 → "5 o'clock"
                                     if minute in (0, None):
                                         time_phrase = f"{hour} o'clock"
                                     else:
@@ -754,7 +870,6 @@ def run_touch_ui(fullscreen: bool = True):
                                     speak("Okay, I turned on commute updates.")
 
                         elif cmd == "network_error":
-                            # Network between Pi and server is down
                             try:
                                 speak(
                                     "I couldn't contact the server to understand that. "
@@ -763,8 +878,25 @@ def run_touch_ui(fullscreen: bool = True):
                             except Exception as e:
                                 print("[ui] network_error speak failed:", repr(e), flush=True)
 
+                        elif cmd == "query_weather":
+                            when = str(payload.get("when") or "today").lower()
+                            try:
+                                speak_weather_summary(when)
+                            except Exception as e:
+                                print("[ui] speak_weather_summary error:", e, flush=True)
+                            mode["view"] = "weather"
+                            ui_refresh["dirty"] = True
+
+                        elif cmd == "query_events":
+                            when = str(payload.get("when") or "today").lower()
+                            try:
+                                speak_events_summary(when)
+                            except Exception as e:
+                                print("[ui] speak_events_summary error:", e, flush=True)
+                            mode["view"] = "calendar"
+                            ui_refresh["dirty"] = True
+
                         elif cmd == "gemini_error":
-                            # make the clock honest about being unable to plan
                             try:
                                 from PIapp.pi_tts import speak as _speak
                             except Exception:
@@ -790,13 +922,12 @@ def run_touch_ui(fullscreen: bool = True):
                 voice_cmd_state["last_check"] = now
         except Exception:
             pass
+
         if SMART["COMMUTE_UPDATES"]:
             try:
-                # Only run this at most every COMMUTE_REPLAN_INTERVAL_MIN
                 if now - commute_last_check["ts"] > COMMUTE_REPLAN_INTERVAL_MIN * 60:
                     commute_last_check["ts"] = now
 
-                    # Try to replan each enabled commute alarm
                     for alarm in alarms["items"]:
                         if not alarm.get("commute"):
                             continue
@@ -807,9 +938,8 @@ def run_touch_ui(fullscreen: bool = True):
                         arrival = alarm.get("arrival_time")
                         prep = alarm.get("prep_minutes")
                         if not dest or not arrival:
-                            continue  # not enough info to replan
+                            continue
 
-                        # Compute minutes until current alarm
                         try:
                             import datetime as _dt
                             now_dt = _dt.datetime.now()
@@ -819,20 +949,16 @@ def run_touch_ui(fullscreen: bool = True):
                                 second=0,
                                 microsecond=0,
                             )
-                            # if alarm time is "for tomorrow" and already passed today, bump by a day
                             if alarm_dt < now_dt:
                                 alarm_dt = alarm_dt + _dt.timedelta(days=1)
                             mins_until_alarm = int((alarm_dt - now_dt).total_seconds() / 60)
                         except Exception:
                             continue
 
-                        # Don't keep moving the alarm around very close to wake time
                         if mins_until_alarm <= COMMUTE_FREEZE_WINDOW_MIN:
                             continue
-
-                        # Call server /plan_alarm with same arrival+destination
+                        
                         try:
-                            import requests
                             resp = requests.post(
                                 PC_SERVER.rstrip("/") + "/plan_alarm",
                                 json={
@@ -858,13 +984,11 @@ def run_touch_ui(fullscreen: bool = True):
 
                         current_minutes = int(alarm["hour"]) * 60 + int(alarm["minute"])
                         new_minutes = new_h * 60 + new_m
-                        delta = new_minutes - current_minutes  # negative = earlier
-
-                        # Only move alarm if we need to get up earlier by at least threshold
+                        delta = new_minutes - current_minutes
                         if delta >= 0:
-                            continue  # don't auto-move later; being early is safer
+                            continue 
                         if abs(delta) < COMMUTE_UPDATE_THRESHOLD_MIN:
-                            continue  # tiny change, ignore
+                            continue
 
                         print(
                             f"[ui] commute alarm for {dest} adjusted from "
@@ -892,7 +1016,6 @@ def run_touch_ui(fullscreen: bool = True):
                     except Exception as e:
                         print("TTS alarm error:", e)
                         if not played:
-
                             print("No alarm sound played.")
                     active_alarm["idx"] = idx
                     active_alarm["ts"] = time.time()
@@ -912,7 +1035,7 @@ def run_touch_ui(fullscreen: bool = True):
     SWIPE_MAX_TIME = 0.8
     gesture = {"x": 0, "y": 0, "t": 0.0, "active": False}
 
-    PAGES = ["calendar", "clock", "weather"]  # left -> right order (exclude 'alarm')
+    PAGES = ["calendar", "clock", "weather"]
 
     def next_view():
         v = mode["view"]
@@ -1017,7 +1140,6 @@ def run_touch_ui(fullscreen: bool = True):
                     render()
                     return
                 if inside(layout.get("delete_btn", (0, 0, 0, 0))) and len(alarms["items"]) > 1:
-                    # Delete current alarm; keep at least one entry
                     alarms["items"].pop(alarms["i"])
                     alarms["i"] = min(alarms["i"], len(alarms["items"]) - 1)
                     _save_alarms()
@@ -1025,7 +1147,6 @@ def run_touch_ui(fullscreen: bool = True):
                     render()
                     return
                 if inside(layout.get("ampm_btn", (0, 0, 0, 0))):
-                    # Toggle AM/PM while keeping hour within 0-23
                     cur["hour"] = (cur.get("hour", 0) + 12) % 24
                 elif inside(layout.get("h_ones_plus", (0, 0, 0, 0))) or inside(layout.get("h_ones_minus", (0, 0, 0, 0))):
                     ampm_pm = cur["hour"] >= 12

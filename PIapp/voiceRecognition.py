@@ -28,7 +28,7 @@ except Exception:
 ACCESS_KEY   = os.getenv("PICOVOICE_ACCESS_KEY")  # Set your Picovoice AccessKey via env var
 # Align endpoint/device/seconds with voicePage defaults
 TRANSCRIBE_EP = os.getenv("VOICE_SERVER_URL", os.getenv("SERVER_URL", "http://10.0.0.111:5000/transcribe"))
-ARECORD_CARD = os.getenv("ARECORD_CARD", os.getenv("VOICE_ARECORD_DEVICE", "plughw:2,0"))  # Use plughw for resampling; override via env
+ARECORD_CARD = os.getenv("ARECORD_CARD", os.getenv("VOICE_ARECORD_DEVICE", "plughw:3,0"))  # Use plughw for resampling; override via env
 DEVICE_INDEX = int(os.getenv("PVREC_DEVICE_INDEX", "-1"))  # pvrecorder input device index
 # Built-in wake-words to use when no custom KEYWORD paths are available
 KEYWORDS     = ["jarvis"]
@@ -306,12 +306,22 @@ def send_to_server(path: str) -> str:
                 payload["prep_minutes"] = prep
             if dest or arrival or leave:
                 payload["cmd"] = "set_commute"
+            
+        elif intent == "query_weather":
+            when = nlu.get("when") or "today"
+            payload["cmd"] = "query_weather"
+            payload["when"] = when
 
+        elif intent == "query_events":
+            when = nlu.get("when") or "today"
+            payload["cmd"] = "query_events"
+            payload["when"] = when
+            
         elif intent == "toggle_commute_updates":
             state = nlu.get("state")
             payload["cmd"] = "toggle_commute_updates"
             payload["state"] = state
-        
+
         elif intent == "delete_alarm":
             payload["cmd"] = "delete_alarm"
 
@@ -334,6 +344,8 @@ def send_to_server(path: str) -> str:
 
         elif intent == "stop_alarm":
             payload["cmd"] = "stop_alarm"
+
+
 
         try:
             with open(VOICE_CMD_PATH, "w", encoding="utf-8") as g:

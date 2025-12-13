@@ -22,10 +22,10 @@ fontPath = os.path.join(_BASE_DIR, "font", "CaviarDreams_Bold.ttf")
 _FONT_CACHE = {}
 _ICON_CACHE = {}
 DEG = "\u00B0"
-ICON_SIZE_CURRENT = (96, 96)
+ICON_SIZE_CURRENT = (120, 120)
 TITLE_LEFT_PAD = 20
 TITLE_X_NUDGE = -10  # shift Current Weather title slightly left
-ICON_SIZE_FORECAST = (80, 80)
+ICON_SIZE_FORECAST = (96, 96)
 
 
 def _font(size: int):
@@ -129,32 +129,46 @@ def drawCurrentWather(weatherForecastData=None):
     updateTime = weatherForecastData['current']['last_updated']
 
     # Layout constants
-    y1TopMergin = 50
-    y1stRowOffset = 70
-    x1stRowOffset = 250
-    y2TopMergin = y1stRowOffset + y1TopMergin + 210
-    y2ndRowOffset = 70
-    x2ndRightOffset = 100
-    x2ndRowOffset = 330
+    header_y = 30
+    current_block_top = 110 
+    forecast_block_top = 320 
+
+    header_font = _font(30)
+    title_font = _font(22)
+    line_font = _font(22)
+    forecast_font = _font(20)
 
     # Header centered; updated time right-bottom aligned
     hdr = f"{city}, {state}, {country}"
-    hdr_w, _ = _text_size(draw, hdr, _font(26))
-    draw.text(((windowWidth - hdr_w) // 2, 20), hdr, font=_font(26), fill="#600000")
+    hdr_w, hdr_h = _text_size(draw, hdr, header_font)
+    draw.text(
+        ((windowWidth - hdr_w) // 2, header_y),
+        hdr,
+        font=header_font,
+        fill="#600000",
+    )
+
     upd = f"Updated: {updateTime}"
-    upd_w, _ = _text_size(draw, upd, _font(17))
-    draw.text((windowWidth - upd_w - 10, 570), upd, font=_font(17), fill="#600000")
+    upd_font = _font(17)
+    upd_w, upd_h = _text_size(draw, upd, upd_font)
+    draw.text(
+        (windowWidth - upd_w - 12, windowHeight - upd_h - 10),
+        upd,
+        font=upd_font,
+        fill="#600000",
+    )
 
-    # Current conditions title will be drawn after computing text block width
-    title = "Current Weather"
-    try:
-        icon_image = _get_icon(currentWeatherIconURL, ICON_SIZE_CURRENT)
-        # Paste with mask so alpha is respected over white background
-        image.paste(icon_image, (x1stRowOffset + 50, y1TopMergin + 40), icon_image)
-    except Exception:
-        pass
+    upd = f"Updated: {updateTime}"
+    upd_font = _font(17)
+    upd_w, upd_h = _text_size(draw, upd, upd_font)
+    draw.text(
+        (windowWidth - upd_w - 12, windowHeight - upd_h - 10),
+        upd,
+        font=upd_font,
+        fill="#600000",
+    )
 
-    line_font = _font(20)
+    # ---------------- Current conditions (centered) ----------------
     labels = ["Temp:", "Feels like:", "Wind:", "Humidity:", "Sunrise:", "Sunset:"]
     values = [
         f"{currentTempInC}{DEG}C",
@@ -164,56 +178,114 @@ def drawCurrentWather(weatherForecastData=None):
         f"{sunriseToday}",
         f"{sunsetToday}",
     ]
+
     lbl_w_max = max(_text_size(draw, s, line_font)[0] for s in labels)
     val_w_max = max(_text_size(draw, s, line_font)[0] for s in values)
-    gap = 12
-    right_bound = x1stRowOffset + lbl_w_max + gap + val_w_max
-    # Draw title centered within the text block cell with a bit of left padding
-    cell_left = x1stRowOffset + TITLE_LEFT_PAD
-    cell_right = right_bound
-    title_w, _ = _text_size(draw, title, _font(20))
-    draw.text((cell_left + (cell_right - cell_left - title_w)//2 + TITLE_X_NUDGE, y1TopMergin + 20), title, font=_font(20), fill="#600000")
-    _draw_label_value(draw, x1stRowOffset, y1stRowOffset + y1TopMergin + 50,  right_bound, "Temp:",       values[0], line_font, "#600000")
-    _draw_label_value(draw, x1stRowOffset, y1stRowOffset + y1TopMergin + 75,  right_bound, "Feels like:", values[1], line_font, "#600000")
-    _draw_label_value(draw, x1stRowOffset, y1stRowOffset + y1TopMergin + 100,  right_bound, "Wind:",       values[2], line_font, "#600000")
-    _draw_label_value(draw, x1stRowOffset, y1stRowOffset + y1TopMergin + 125, right_bound, "Humidity:",   values[3], line_font, "#600000")
-    _draw_label_value(draw, x1stRowOffset, y1stRowOffset + y1TopMergin + 150, right_bound, "Sunrise:",    values[4], line_font, "#600000")
-    _draw_label_value(draw, x1stRowOffset, y1stRowOffset + y1TopMergin + 175, right_bound, "Sunset:",     values[5], line_font, "#600000")
+    gap = 14
+    block_width = lbl_w_max + gap + val_w_max
 
-    # 3-day forecast
-    forecastDays = weatherForecastData['forecast']['forecastday']
-    for counter, day in enumerate(forecastDays):
-        WeatherIconURL = day['day']['condition']['icon']
-        if WeatherIconURL.startswith("//"):
-            WeatherIconURL = "http:" + WeatherIconURL
+    # Center the text block horizontally
+    x1stRowOffset = (windowWidth - block_width) // 2
+    right_bound = x1stRowOffset + block_width
 
-        margin = x2ndRowOffset * counter
-        col_left  = x2ndRightOffset + margin
-        # Left-align the date text within the forecast column
-        date_txt = f"{day['date']}"
-        draw.text((col_left + 20, y2TopMergin + 20), date_txt, font=_font(20), fill="#600000")
-        try:
-            icon_image = _get_icon(WeatherIconURL, ICON_SIZE_FORECAST)
-            image.paste(icon_image, (x2ndRightOffset + 40 + margin, y2TopMergin + 40), icon_image)
-        except Exception:
-            pass
-        # Column metrics
-        f20 = _font(20)
-        col_labels = ["Max:", "Min:", "Chance:", "Precip:"]
-        col_values = [
-            f"{day['day']['maxtemp_c']}{DEG}C",
-            f"{day['day']['mintemp_c']}{DEG}C",
-            f"{day['day']['daily_chance_of_rain']}%",
-            f"{day['day']['totalprecip_mm']} mm",
-        ]
-        col_lbl_w_max = max(_text_size(draw, s, f20)[0] for s in col_labels)
-        col_val_w_max = max(_text_size(draw, s, f20)[0] for s in col_values)
-        col_gap = 10
-        col_right = col_left + col_lbl_w_max + col_gap + col_val_w_max
-        _draw_label_value(draw, col_left, y2TopMergin + y2ndRowOffset + 45,  col_right, col_labels[0], col_values[0], f20, "#600000")
-        _draw_label_value(draw, col_left, y2TopMergin + y2ndRowOffset + 70,  col_right, col_labels[1], col_values[1], f20, "#600000")
-        _draw_label_value(draw, col_left, y2TopMergin + y2ndRowOffset + 95,  col_right, col_labels[2], col_values[2], f20, "#600000")
-        _draw_label_value(draw, col_left, y2TopMergin + y2ndRowOffset + 120, col_right, col_labels[3], col_values[3], f20, "#600000")
+    # Icon to the left of the text block, also vertically aligned with it
+    try:
+        icon_image = _get_icon(currentWeatherIconURL, ICON_SIZE_CURRENT)
+        icon_w, icon_h = icon_image.size
+        icon_x = x1stRowOffset - icon_w - 30
+        icon_y = current_block_top + 10
+        image.paste(icon_image, (icon_x, icon_y), icon_image)
+    except Exception:
+        pass
+
+    # "Current Weather" title centered over the text block
+    current_title = "Current Weather"
+    title_w, title_h = _text_size(draw, current_title, title_font)
+    title_x = x1stRowOffset + (block_width - title_w) // 2
+    title_y = current_block_top - title_h - 10
+    draw.text((title_x, title_y), current_title, font=title_font, fill="#600000")
+
+    # Draw the label/value pairs
+    base_y = current_block_top + 10
+    line_step = 28
+    for i, (lab, val) in enumerate(zip(labels, values)):
+        y = base_y + i * line_step
+        _draw_label_value(
+            draw,
+            x1stRowOffset,
+            y,
+            right_bound,
+            lab,
+            val,
+            line_font,
+            "#600000",
+        )
+
+    # ---------------- 3-day forecast (centered row) ----------------
+    forecastDays = weatherForecastData["forecast"]["forecastday"]
+    num_days = len(forecastDays)
+    if num_days > 0:
+        col_width = 260
+        total_width = col_width * num_days
+        start_x = max(20, (windowWidth - total_width) // 2)
+
+        for idx, day in enumerate(forecastDays):
+            WeatherIconURL = day["day"]["condition"]["icon"]
+            if WeatherIconURL.startswith("//"):
+                WeatherIconURL = "http:" + WeatherIconURL
+
+            col_left = start_x + idx * col_width
+
+            # Date at top of the column
+            date_txt = f"{day['date']}"
+            date_w, date_h = _text_size(draw, date_txt, forecast_font)
+            draw.text(
+                (col_left + (col_width - date_w) // 2, forecast_block_top),
+                date_txt,
+                font=forecast_font,
+                fill="#600000",
+            )
+
+            # Icon below date
+            try:
+                icon_image = _get_icon(WeatherIconURL, ICON_SIZE_FORECAST)
+                icon_w, icon_h = icon_image.size
+                icon_x = col_left + (col_width - icon_w) // 2
+                icon_y = forecast_block_top + date_h + 10
+                image.paste(icon_image, (icon_x, icon_y), icon_image)
+            except Exception:
+                icon_h = ICON_SIZE_FORECAST[1]
+
+            # Label/value pairs below icon
+            col_labels = ["Max:", "Min:", "Chance:", "Precip:"]
+            col_values = [
+                f"{day['day']['maxtemp_c']}{DEG}C",
+                f"{day['day']['mintemp_c']}{DEG}C",
+                f"{day['day']['daily_chance_of_rain']}%",
+                f"{day['day']['totalprecip_mm']} mm",
+            ]
+            col_lbl_w_max = max(_text_size(draw, s, forecast_font)[0] for s in col_labels)
+            col_val_w_max = max(_text_size(draw, s, forecast_font)[0] for s in col_values)
+            col_gap = 10
+            col_block_width = col_lbl_w_max + col_gap + col_val_w_max
+
+            col_block_left = col_left + (col_width - col_block_width) // 2
+            col_block_right = col_block_left + col_block_width
+
+            base_y2 = forecast_block_top + date_h + 10 + icon_h + 10
+            step2 = 26
+            for j, (lab, val) in enumerate(zip(col_labels, col_values)):
+                y2 = base_y2 + j * step2
+                _draw_label_value(
+                    draw,
+                    col_block_left,
+                    y2,
+                    col_block_right,
+                    lab,
+                    val,
+                    forecast_font,
+                    "#600000",
+                )
 
     return ImageTk.PhotoImage(image)
 

@@ -1,127 +1,280 @@
-1. Install Pi imager, PuTTY, WinSCP, Real VNC Viewer
-2. install pi os(regacy, 32 bit) to the micro SD card with WIFI setting
-   Edit the Wi-Fi setting info and enable SSH in customisation
-4. Connect Putty
-5. Install and Enable VNC to use real VNC Viewer
-      sudo apt update
-      sudo apt install -y realvnc-vnc-server
-      sudo raspi-config  # → Interface Options → VNC → <Yes> → Finish
-      sudo reboot
-6. Move the program file with Win SCP to the pi OS
-7. Use Real VNC Viwer to controll the PI os
-8. Install sox
-      sudo apt install -y alsa-utils sox
+CompanionClock
+CompanionClock is a Raspberry Pi–based smart bedside clock with:
+- Full-screen Clock, Alarm, Weather, and Calendar pages
+- Smart commute alarms that plan leave times
+- Voice control (wake word → speech → NLU → actions)
+- PC-side server that does speech recognition (Whisper), NLU (Gemini or regex), and TTS (Coqui or Edge)
+_______________________________________________
+Hardware and tools
+_______________________________________________
+You need:
+- Raspberry Pi (tested with Raspberry Pi OS “Legacy 32-bit”)
+- Micro-SD card + reader
+- USB microphone (Keyestudio mic is supported)
+- Speaker or other audio output
+- PC or laptop on the same network (for the server)
+On the PC (Windows in these notes):
+- Raspberry Pi Imager
+- PuTTY (SSH)
+- WinSCP (file transfer)
+- RealVNC Viewer (remote desktop)
 
-CompanionClock – Overview
-- Multi-page smart display for Raspberry Pi: Clock, Weather, Calendar, simple Voice UI, optional PC-side ASR server.
-- Fonts unified across all pages to `font/CaviarDreams_Bold.ttf` for a consistent look.
-- Weather page layout updated: labels left-aligned, values right-aligned with compact spacing.
+_______________________________________________
+Flashing Pi OS and first boot (one time)
+_______________________________________________
 
-Raspberry Pi – Software Setup
-- Install Tk/Pillow and Python deps
-  - `sudo apt install -y python3-tk python3-pip libjpeg-dev zlib1g-dev`
-  - `pip3 install -r PIapp/requirements_PI.txt`
-- Optional audio tools (already partially listed above)
-  - `sudo apt install -y alsa-utils sox`
+- Use Raspberry Pi Imager to flash “Raspberry Pi OS (Legacy, 32-bit)” to the SD card.
 
-Run (Pi side)
-- Default touch UI (fullscreen): `python3 main.py`
-- Windowed UI: `python3 main.py ui --windowed`
-- Individual pages (for testing)
-  - Clock: `python3 main.py clock --windowed`
-  - Weather rendering is part of the UI; no separate CLI.
-  - Calendar (print data only): `python3 main.py calendar`
-  - Voice recognition (wake-word → record): `python3 main.py voice`
+- In Imager’s advanced options:
+  - Turn on Wi-Fi and enter SSID and password.
+  - Turn on SSH.
 
-PC-side ASR Server (optional)
-- Install requirements: `pip install -r PCapp/requirements_PC.txt`
-- Run: `python -m PCapp.Server` or `python main.py server`
-- Environment (optional):
-  - `WHISPER_MODEL=small` (default). Try `medium`/`large-v3` for accuracy vs. speed.
-  - `FORCE_CPU=1` to force CPU if CUDA is present but undesired.
-  - `GEMINI_API_KEY` to enable `/transcribe_nlu` intent extraction.
+- Boot the Pi with that SD card.
+- From the PC, connect with PuTTY (IP address or “raspberrypi.local”).
 
-Environment Variables (Pi side)
-- Weather
-  - `WEATHERAPI_KEY` (recommended): WeatherAPI key for reliable forecasts
-  - `WEATHER_LOCATION` (e.g. `Tokyo` or `35.68,139.76`) or `WEATHER_LAT`/`WEATHER_LON`
-- Voice
-  - `PICOVOICE_ACCESS_KEY`: Required for Porcupine wake word
-  - `PVREC_DEVICE_INDEX` or `PVREC_DEVICE_NAME`: Select input device
-  - `ARECORD_CARD` (default `plughw:1,0`): arecord device for fallback recording
-  - `VOICE_OFFLINE=1`: Skip sending audio to server; record only
-  - `VOICE_PLAYBACK=1`: Play recorded audio after capture
-  - `VOICE_CMD_PATH` (default `/tmp/cc_voice_cmd.json`): IPC file for UI navigation
+_______________________________________________
+Enable VNC and copy the project to the Pi
+_______________________________________________
 
-Notes
-- Fonts: Pages use `font/CaviarDreams_Bold.ttf` uniformly.
-- Weather icons are fetched over HTTP; ensure network access to `api.weatherapi.com` and icon URLs.
-- If Tkinter is missing, install `python3-tk` (Debian/RPi) or ensure your Python includes Tk.
+On the Pi (via SSH):
+sudo apt update
+sudo apt install -y realvnc-vnc-server
+sudo raspi-config          (Interface Options → VNC → Yes → Finish)
+sudo reboot
 
-Troubleshooting
-- UI doesn’t start: verify Tkinter/Pillow installation.
-- Weather fails to show: set `WEATHERAPI_KEY` and check network; location can be overridden via env.
-- Degree symbol: uses UTF-8 `°C`. If your terminal shows mojibake, ensure UTF-8 locale.
-- Stray files: deleting `PIapp/tempCodeRunnerFile.py` and `PIapp/temperature .py` (empty) is safe.
-5. Install and Enable VNC to use real VNC Viewer
-      sudo apt update
-      sudo apt install -y realvnc-vnc-server
-      sudo raspi-config  # → Interface Options → VNC → <Yes> → Finish
-      sudo reboot
-6. Move the program file with Win SCP to the pi OS
-7. Use Real VNC Viwer to controll the PI os
-8. See https://docs.keyestudio.com/projects/KS0314/en/latest/docs/KS0314.html for installing the driver of the mic
+On the PC:
+- Use WinSCP to copy the “Companioclock” folder onto the Pi (for example into “~/Companioclock”).
+- Use RealVNC Viewer to connect to the Pi’s desktop.
 
-________________________________________________________________________
-Text-to-Speech (TTS) Integration
-This service supports two engines:
-Coqui-TTS (default) — offline, high-quality.
-Edge-TTS — online (Microsoft voice), returns MP3 which is converted to WAV.
+_______________________________________________
+Raspberry Pi software setup
+_______________________________________________
+On the Pi:
+cd ~/Companioclock/main
+sudo apt update
+sudo apt install -y python3-tk python3-pip libjpeg-dev zlib1g-dev
+sudo apt install -y alsa-utils sox
 
-Setup
-----------------------
-1) Install runtime dependencies
-Python: 3.9–3.12 tested
-FFmpeg: required on the machine running the Flask server
-Windows: install from ffmpeg.org and add bin to PATH
-macOS: brew install ffmpeg
-Linux: sudo apt-get install ffmpeg
-install eSpeak-NG and set PHONEMIZER_ESPEAK_LIBRARY (Windows path) so Coqui can phonemize.
+Create and activate a virtual environment:
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r PIapp/requirements_PI.txt
 
-2) Python packages
+If you use a Keyestudio mic, install its driver according to the vendor instructions.
+
+_______________________________________________
+PC-side ASR / TTS server
+_______________________________________________
+On the PC in the project root:
+cd C:\Companioclock\main
+python -m venv .venv
+.\.venv\Scripts\activate
 pip install -r PCapp/requirements_PC.txt
 
-3) Pick the TTS engine (env vars)
-Default engine:
-set TTS_ENGINE=coqui # Windows PowerShell: $env:TTS_ENGINE="coqui"
+5.1 TTS engines
+The server supports two text-to-speech engines:
+Coqui-TTS (default, offline, outputs WAV)
 
-Coqui model (list with tts --list_models):
-set COQUI_MODEL=tts_models/en/ljspeech/tacotron2-DDC
 
-4) Run the server
+Edge-TTS (online, Microsoft voices, MP3 converted to WAV)
 
-5) Generate audio
-Coqui (WAV, already normalized to mono 16 kHz):
+
+Requirements on the PC:
+Python 3.9–3.12
+FFmpeg installed and on PATH
+eSpeak-NG installed (needed by Coqui)
+
+
+Example environment variables (Windows PowerShell):
+$env:TTS_ENGINE="coqui"        # or "edge"
+$env:COQUI_MODEL="tts_models/en/ljspeech/tacotron2-DDC"
+
+Run the server:
+python PCapp/Server.py
+# or
+python -m PCapp.Server
+
+Example TTS calls:
+Coqui:
 curl -o out.wav "http://<HOST>:5000/tts?text=Hello+from+Coqui&engine=coqui"
 
-Edge-TTS (converted MP3→WAV):
+Edge:
 curl -o out.wav "http://<HOST>:5000/tts?text=Hello+from+Edge&engine=edge&voice=en-US-JennyNeural"
 
-6) Raspberry Pi playback
+On the Pi you can test playback with:
 aplay out.wav
-________________________________________________________________________
 
-### NLU (text)
-- **GET** `/nlu?text=...`
-- **POST** `/nlu` with JSON `{"text":"..."}`
+5.2 NLU HTTP API
+The server exposes a simple NLU endpoint:
+GET /nlu?text=...
+POST /nlu with JSON {"text": "..."}
 
-Response:
-```json
+
+Example response:
 {
   "text": "set an alarm at 7:30 am",
-  "engine": "gemini",               // or "regex" when Gemini not configured
+  "engine": "gemini",
   "nlu": {
     "intent": "set_alarm",
     "alarm_time": "07:30"
   }
 }
+
+If GEMINI_API_KEY is not set, the server falls back to the built-in regex NLU instead of Gemini.
+
+_______________________________________________
+Environment variables
+_______________________________________________
+6.1 On the Pi
+Weather:
+export WEATHERAPI_KEY="your_WeatherAPI_key"
+
+Optional overrides:
+export WEATHER_LOCATION="San Jose, CA"
+# or
+export WEATHER_LAT="37.33"
+export WEATHER_LON="-121.89"
+
+Voice and audio:
+export PICOVOICE_ACCESS_KEY="..."          # Porcupine wake word key
+export ARECORD_CARD="plughw:2,0"           # ALSA device from `arecord -l`
+export VOICE_SERVER_URL="http://<PC_IP>:5000/transcribe"
+export PC_SERVER="http://<PC_IP>:5000"
+export VOICE_CMD_PATH="/tmp/cc_voice_cmd.json"
+
+Debug flags:
+export VOICE_OFFLINE=1    # record but don’t call the server
+export VOICE_PLAYBACK=1   # play back recorded audio
+
+6.2 On the PC (server side)
+set WHISPER_MODEL=small       # or medium, large-v3
+set FORCE_CPU=1               # force CPU instead of GPU
+set GEMINI_API_KEY=...        # enable Gemini NLU
+set TTS_ENGINE=coqui          # or edge
+
+_______________________________________________
+Running the system
+_______________________________________________
+
+7.1 Start the server (PC)
+cd C:\Companioclock\main
+.\.venv\Scripts\activate
+python PCapp/Server.py
+
+7.2 Start the UI (Pi)
+cd ~/Companioclock/main
+source .venv/bin/activate
+export VOICE_CMD_PATH=/tmp/cc_voice_cmd.json
+
+Fullscreen:
+python main.py ui
+Windowed (useful over VNC):
+python main.py ui --windowed
+
+7.3 Start voice recognition (Pi)
+cd ~/Companioclock/main
+source .venv/bin/activate
+export PICOVOICE_ACCESS_KEY="..."
+export ARECORD_CARD="plughw:2,0"
+export VOICE_CMD_PATH="/tmp/cc_voice_cmd.json"
+export VOICE_SERVER_URL="http://<PC_IP>:5000/transcribe"
+
+python PIapp/voiceRecognition.py
+
+_______________________________________________
+Features and voice commands
+_______________________________________________
+8.1 Pages
+Clock:
+- Big digital clock and date.
+- Swipe between pages.
+Alarm:
+- Add and delete alarms.
+- Toggle each alarm ON/OFF.
+- Smart commute alarms with:
+  - From / To locations,
+  - Preparation time,
+  - Optional smart commute auto-updates.
+
+Weather:
+- Current conditions centered (temperature, feels like, wind, humidity, sunrise, sunset).
+- 3-day forecast centered across the screen.
+
+Calendar:
+_ Month view with event dots and short titles from Google Calendar.
+
+8.2 Example voice commands
+ (wake word not shown; typically you say “Companion clock, ...” first)
+Alarms:
+- “Set an alarm for 7 AM.”
+- “Please add alarm for 8 in the morning.”
+- “Set an alarm for 7:30 PM.”
+- “Turn off alarms.” / “Disable all alarms.”
+- “Turn on alarms.” / “Enable all alarms.”
+- “Snooze alarm for 10 minutes.”
+- “Stop alarm.”
+
+Smart commute:
+- “I have to get to San Jose State University by 8 AM tomorrow, plan my commute.”
+- “Turn off smart commute updates.”
+- “Turn on smart commute updates.”
+
+Weather:
+- “What’s the weather like today?”
+- “What’s the weather tomorrow?”
+
+Calendar:
+- “What are my events today?”
+- “What are my events tomorrow?”
+
+Navigation:
+- “Show alarms.”
+- “Show the clock.”
+- “Show the weather.”
+- “Show my calendar.”
+The exact phrases that work will depend on your NLU configuration (regex only vs Gemini).
+
+_______________________________________________
+Troubleshooting
+_______________________________________________
+UI won’t start:
+- Make sure Tkinter is installed: sudo apt install -y python3-tk
+
+- Reinstall Python dependencies: pip install -r PIapp/requirements_PI.txt
+
+Weather page shows “unavailable”:
+- Check that WEATHERAPI_KEY is set and valid.
+- Make sure the Pi has internet access.
+
+Voice doesn’t react:
+- Verify PICOVOICE_ACCESS_KEY and ARECORD_CARD.
+- Check that VOICE_SERVER_URL points to the right PC IP and port.
+- Check PC firewall rules so the Pi can reach port 5000.
+
+No alarms after “set alarm ...”:
+- On the PC server, look for intent: "set_alarm" in the log.
+- On the Pi UI log, look for [ui] VOICE_CMD payload: {'cmd': 'set_alarm', ...}.
+- Make sure both UI and voice processes use the same VOICE_CMD_PATH.
+
+No TTS:
+- Test /tts from the Pi using curl and play the WAV with aplay.
+- Check FFmpeg and Coqui/Edge installation on the PC.
+
+_______________________________________________
+Project layout (high level)
+_______________________________________________
+- main.py
+  - Entry point for the UI and command-line modes.
+- PIapp/
+  - clock.py – clock page.
+  - Alarm.py – alarm page UI and alarm logic.
+  - weather.py – weather page.
+  - calendarPage.py – calendar page.
+  - voiceRecognition.py – wake word, recording, sending audio to server, writing cc_voice_cmd.json.
+  - nlu.py – regex NLU (alarms, navigation, weather and event queries, smart commute toggles).
+  - calendar_service.py – Google Calendar integration.
+  - pi_tts.py – TTS client talking to the PC server.
+- PCapp/
+  - Server.py – Flask-based server for transcription, NLU, and TTS.
+- font/
+  - CaviarDreams_Bold.ttf – main UI font.

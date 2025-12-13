@@ -6,7 +6,7 @@ import requests
 
 from flask import Flask, request, jsonify, send_file
 from faster_whisper import WhisperModel
-from PIapp.nlu import get_intent  # lightweight NLU, avoids pvporcupine dependency
+from PIapp.nlu import get_intent
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,7 +24,6 @@ TRAFFIC_MODEL         = os.environ.get("TRAFFIC_MODEL", "best_guess").strip()
 
 _tz = dt.datetime.now().astimezone().tzinfo
 
-# Config 
 TTS_ENGINE_DEFAULT = os.environ.get("TTS_ENGINE", "coqui").strip().lower()
 COQUI_MODEL = os.environ.get("COQUI_MODEL", "tts_models/en/vctk/vits").strip()
 
@@ -126,7 +125,6 @@ def _unix_epoch(dts: dt.datetime) -> int:
 
 def _google_travel_minutes(origin: str, destination: str, depart_local: dt.datetime) -> int:
     if not GOOGLE_MAPS_API_KEY:
-        # Fallback: rough 30min if no key configured
         return 30
     url = "https://maps.googleapis.com/maps/api/directions/json"
     params = {
@@ -141,7 +139,7 @@ def _google_travel_minutes(origin: str, destination: str, depart_local: dt.datet
     r.raise_for_status()
     data = r.json()
     routes = (data.get("routes") or [])
-    if not routes:  # fallback
+    if not routes:
         return 30
     leg = (routes[0].get("legs") or [{}])[0]
     dur = leg.get("duration_in_traffic") or leg.get("duration") or {}
@@ -198,24 +196,20 @@ def plan_alarm(arrival_hhmm: str, destination: str, prep_minutes: Optional[int],
         return {"error": "invalid arrival_time"}
     today = dt.datetime.now(tz=_tz).date()
     arrival_dt = dt.datetime.combine(today, tt, tzinfo=_tz)
-    # If arrival time already passed today, assume tomorrow
     if arrival_dt < dt.datetime.now(tz=_tz):
         arrival_dt = arrival_dt + dt.timedelta(days=1)
 
     orig = origin or HOME_ADDRESS or "home"
-    # Iterate: travel depends on departure, but one or two passes is enough
-    # Start with a guess: depart = arrival - fixed 45 min
     depart_guess = arrival_dt - dt.timedelta(minutes=45)
     travel_min = _google_travel_minutes(orig, destination, depart_guess)
     weather_buf = _weather_buffer_minutes(depart_guess)
     depart_dt = arrival_dt - dt.timedelta(minutes=prep + travel_min + weather_buf)
 
-    # refine once with updated depart time
     travel_min = _google_travel_minutes(orig, destination, depart_dt)
     weather_buf = _weather_buffer_minutes(depart_dt)
     depart_dt = arrival_dt - dt.timedelta(minutes=prep + travel_min + weather_buf)
 
-    alarm_dt = depart_dt  # wake == depart; if you want pre-depart buffer, add here
+    alarm_dt = depart_dt  
     hhmm = alarm_dt.strftime("%H:%M")
     return {
         "alarm_time": hhmm,
@@ -229,9 +223,7 @@ def plan_alarm(arrival_hhmm: str, destination: str, prep_minutes: Optional[int],
             "traffic_model": TRAFFIC_MODEL,
         },
     }
-    
 
-# Helpers
 def _have_ffmpeg() -> bool:
     return shutil.which("ffmpeg") is not None
 
@@ -247,7 +239,6 @@ def to_mono16k(in_path: str) -> str:
     )
     return out_path
 
-# Coqui TTS cache
 _coqui = None
 def _get_coqui():
     global _coqui
@@ -257,7 +248,6 @@ def _get_coqui():
         _coqui = CoquiTTS(model_name=COQUI_MODEL, progress_bar=False, gpu=(DEVICE=="cuda"))
     return _coqui
 
-# Endpoints
 @app.get("/health")
 def health():
     return jsonify({
@@ -279,7 +269,6 @@ def transcribe():
     if not f or not getattr(f, "filename", ""):
         return jsonify({"error": "audio file missing (multipart/form-data, field 'audio')"}), 400
 
-    # Save upload
     suffix = os.path.splitext(f.filename or "in.wav")[1] or ".wav"
     in_fd, in_path = tempfile.mkstemp(suffix=suffix)
     os.close(in_fd)
@@ -341,7 +330,6 @@ def transcribe():
             prep_m  = nlu.get("prep_minutes")
             origin  = nlu.get("origin")
 
-            # Normalize missing list
             missing = nlu.get("missing")
             if not isinstance(missing, list):
                 missing = []
@@ -352,11 +340,9 @@ def transcribe():
                 missing.append("destination")
             if "prep_minutes" not in missing and not prep_m:
                 missing.append("prep_minutes")
-            # origin is optional; usually we fall back to HOME_ADDRESS
 
             nlu["missing"] = missing
 
-            # Only compute plan if nothing critical is missing
             if "arrival_time" not in missing and "destination" not in missing and arrival and dest:
                 orig = origin or HOME_ADDRESS or "home"
                 plan = plan_alarm(arrival, dest, prep_m, origin=orig)
@@ -382,7 +368,6 @@ def transcribe():
 
 @app.get("/tts")
 def tts():
-    # Minimal TTS endpoint preserved (optional for Pi client)
     import edge_tts
     text = (request.args.get("text") or "").strip()
     voice = (request.args.get("voice") or "en-US-JennyNeural").strip()
@@ -494,5 +479,4 @@ def _warmup_coqui():
 threading.Thread(target=_warmup_coqui, daemon=True).start()
 
 if __name__ == "__main__":
-    # Bind to 0.0.0.0 so Pi can reach it
     app.run(host="0.0.0.0", port=5000, threaded=True)

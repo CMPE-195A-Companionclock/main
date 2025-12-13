@@ -65,18 +65,32 @@ def _build_sec_tile(sec: str):
 
 def drawClock(dayName, today, currentTime, currentSecond):
     date_text = f"{today} | {dayName}"
-    if _BG_CACHE["key"] != date_text:
-        _BG_CACHE["img"] = _build_background(date_text)
-        _BG_CACHE["key"] = date_text
 
-    if _HHMM_CACHE["key"] != currentTime:
+    bg_key = (windowWidth, windowHeight, date_text)
+    if _BG_CACHE["key"] != bg_key:
+        _BG_CACHE["img"] = _build_background(date_text)
+        _BG_CACHE["key"] = bg_key
+
+    hhmm_key = (windowWidth, windowHeight, currentTime)
+    if _HHMM_CACHE["key"] != hhmm_key:
         _HHMM_CACHE["img"] = _build_hhmm_tile(currentTime)
-        _HHMM_CACHE["key"] = currentTime
+        _HHMM_CACHE["key"] = hhmm_key
 
     base = _BG_CACHE["img"].copy()
-    base.paste(_HHMM_CACHE["img"], (50, 230))
+
+    hhmm_tile = _HHMM_CACHE["img"]
+    hh_w, hh_h = hhmm_tile.size
+    hh_x = (windowWidth - hh_w) // 2
+    hh_y = (windowHeight - hh_h) // 2
+    base.paste(hhmm_tile, (hh_x, hh_y))
+
+    # Put seconds near the bottom-right corner
     sec_tile = _build_sec_tile(currentSecond)
-    base.paste(sec_tile, (920, 410))
+    sec_w, sec_h = sec_tile.size
+    sec_x = windowWidth - sec_w - 60
+    sec_y = windowHeight - sec_h - 60
+    base.paste(sec_tile, (sec_x, sec_y))
+
     return ImageTk.PhotoImage(base)
 
 

@@ -3,9 +3,9 @@ from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 WINDOW_W = 1024
 WINDOW_H = 600
-LIST_W = 260  # left sidebar width for alarm list
+LIST_W = 260
 TIME_FONT_SIZE = 120
-TIME_OFFSET_Y = -70  # lift the entire alarm block further upward
+TIME_OFFSET_Y = -70
 BTN_SIZE = 56
 
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
@@ -37,7 +37,6 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
       - 'toggle' (enable/disable)
       - 'back'
     """
-    # Measure overall time text and per-digit widths
     time_f = _font(TIME_FONT_SIZE)
     hour12 = (hour % 12) or 12
     time_txt = f"{hour12:02d}:{minute:02d}"
@@ -48,7 +47,6 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
     except Exception:
         total_w, total_h = dr.textsize(time_txt, font=time_f)
 
-    # Per character widths
     chars = [f"{hour12:02d}"[0], f"{hour12:02d}"[1], ":", f"{minute:02d}"[0], f"{minute:02d}"[1]]
     widths = []
     for ch in chars:
@@ -65,17 +63,14 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
     top_y = (WINDOW_H - total_h) // 2 + TIME_OFFSET_Y
     bottom_y = top_y + total_h
 
-    # Compute x positions for each char
     x_positions = [start_x]
     for w in widths[:-1]:
         x_positions.append(x_positions[-1] + w)
 
-    # Map positions
     h_tens_x, h_ones_x, colon_x, m_tens_x, m_ones_x = x_positions
     h_tens_w, h_ones_w, colon_w, m_tens_w, m_ones_w = widths
 
-    # Button geometry
-    pad_up = 24   # move the plus a bit higher
+    pad_up = 24
     pad_dn = 8
     btn_h = BTN_SIZE
 
@@ -85,7 +80,6 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
     def below_rect(x, w):
         return (x, bottom_y + pad_dn, x + w, bottom_y + pad_dn + btn_h)
 
-    # Per-digit +/- buttons (hours tens removed; minutes tens kept)
     layout = {
         'h_ones_plus': above_rect(h_ones_x, h_ones_w),
         'h_ones_minus': below_rect(h_ones_x, h_ones_w),
@@ -95,20 +89,18 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
         'm_ones_minus': below_rect(m_ones_x, m_ones_w),
     }
 
-    # AM/PM toggle to the right of time (single underline button)
     ampm_w, ampm_h = 140, 48
-    ampm_y_offset = 22       # nudge a bit lower
-    ampm_x1 = start_x + total_w  # shift left a bit (was +20)
-    base_y = top_y + (total_h - ampm_h)//2 + ampm_y_offset - 8  # lift slightly
+    ampm_y_offset = 22 
+    ampm_x1 = start_x + total_w
+    base_y = top_y + (total_h - ampm_h)//2 + ampm_y_offset - 8
     layout['ampm_btn'] = (ampm_x1, base_y, ampm_x1 + ampm_w, base_y + ampm_h)
     # Enable/Disable toggle above, near the title area (AM/PM stays in place)
-    toggle_w, toggle_h = ampm_w, ampm_h  # align width/height with AM/PM for consistent underline
-    toggle_x1 = ampm_x1 + 12  # slight right offset
-    toggle_y = 20  # roughly align with title height
+    toggle_w, toggle_h = ampm_w, ampm_h
+    toggle_x1 = ampm_x1 + 12
+    toggle_y = 20  
     layout['toggle'] = (toggle_x1, toggle_y, toggle_x1 + toggle_w, toggle_y + toggle_h)
-    # Delete button to the left side (mirroring toggle height/width)
     delete_w, delete_h = toggle_w, toggle_h
-    delete_x1 = LIST_W + 20  # near left side of content area
+    delete_x1 = LIST_W + 20
     delete_y = toggle_y
     layout['delete_btn'] = (delete_x1, delete_y, delete_x1 + delete_w, delete_y + delete_h)
 
@@ -120,12 +112,10 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
     layout['list_trash'] = (list_pad, bottom_y, list_pad + half_w, bottom_y + bottom_h)
     layout['list_add'] = (list_pad + half_w + 8, bottom_y, list_pad + 2*half_w + 8, bottom_y + bottom_h)
 
-    # Bottom row: back centered
     y_buttons = WINDOW_H - 150
     legacy_btn_w, legacy_btn_h = 140, 44
     layout['back'] = (WINDOW_W//2 - legacy_btn_w//2, y_buttons, WINDOW_W//2 + legacy_btn_w//2, y_buttons + legacy_btn_h)
 
-    # Left list items hit areas
     list_pad = 16
     hdr_h = 32
     item_h = 48
@@ -133,7 +123,7 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
     y0 = 20 + hdr_h + 10
     x1 = list_pad
     x2 = LIST_W - list_pad
-    # Ensure items do not overlap bottom buttons
+
     max_items_area_h = bottom_y - y0 - 10
     max_items = max(0, int((max_items_area_h + gap_h) // (item_h + gap_h)))
     count = min(total, max_items)
@@ -141,7 +131,6 @@ def get_layout(hour: int, minute: int, total: int = 1, selected: int = 0):
         y1 = y0 + i * (item_h + gap_h)
         y2 = y1 + item_h
         layout[f'list_{i}'] = (x1, y1, x2, y2)
-        # checkbox square on left inside list item
         cb_size = 24
         layout[f'list_check_{i}'] = (x1 + 6, y1 + (item_h - cb_size)//2, x1 + 6 + cb_size, y1 + (item_h + cb_size)//2)
 
@@ -186,14 +175,13 @@ def _draw_underlined(drw: ImageDraw.ImageDraw, rect, label: str, font, underline
     tx = x1 + (x2 - x1 - tw) // 2
     ty = y1 + (y2 - y1 - th) // 2
     drw.text((tx, ty), label, font=font, fill=_COLOR)
-    # Underline width based on supplied text (e.g., PM, OFF)
     u_txt = underline_text or label
     try:
         l2, t2, r2, b2 = drw.textbbox((0, 0), u_txt, font=font)
         u_w = r2 - l2
     except Exception:
         u_w, _ = drw.textsize(u_txt, font=font)
-    u_w = min(u_w, x2 - x1)  # clamp to button width
+    u_w = min(u_w, x2 - x1)
     u_x1 = x1 + (x2 - x1 - u_w) // 2
     u_x2 = u_x1 + u_w
     underline_y = y2 - pad_v
@@ -207,13 +195,12 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
                commute_origin: Optional[str] = None, commute_destination: Optional[str] = None,
                prep_minutes: Optional[int] = None, smart_commute_updates: bool = True) -> ImageTk.PhotoImage:
     """Return an ImageTk.PhotoImage showing an alarm settings view with buttons."""
-    # Solid white to align with the main clock page background
     img = Image.new("RGB", (WINDOW_W, WINDOW_H), "white")
     drw = ImageDraw.Draw(img)
 
     title_f = _font(40)
     time_f = _font(TIME_FONT_SIZE)
-    small_f = _font(22)
+    small_f = _font(33)
 
     title = "Alarm"
     try:
@@ -240,8 +227,8 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
     drw.text((cx, cy), time_txt, font=time_f, fill=_COLOR)
 
     # Commute info (if available)
-    info_y = cy + wh + 110  # raise info block a bit (still below time)
-    line_h = 36  # larger line spacing
+    info_y = cy + wh + 110 
+    line_h = 36 
     info_f = _font(22)
 
     origin_txt = (commute_origin or "Please set the current location").strip()
@@ -270,7 +257,6 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
     # Left-align the three lines under the time
     text_x = content_x0 + 30
     def _draw_label_value(y, label, value):
-        # Keep all values aligned by padding past the label width
         try:
             l, t, r, b = drw.textbbox((0, 0), label, font=info_f)
             lw = r - l
@@ -292,7 +278,7 @@ def draw_alarm(hour: int, minute: int, enabled: bool, index: int = 1, total: int
 
     # Draw +/- above/below the hour and minute numbers
     layout = get_layout(hour, minute, total=total, selected=selected)
-    small_f = _font(30)  # 1.5x larger for AM/PM
+    small_f = _font(30) 
     big_f = _font(56)
     # +/-: frameless and large per digit
     _draw_text_centered(drw, layout['h_ones_plus'], "+", big_f)
